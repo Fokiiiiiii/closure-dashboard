@@ -173,6 +173,20 @@ pub(super) fn control(
             result.push_str("</select>");
             result
         }
+        // A long text, such as a greeting, gets room to be written in; the bot checks its shape on save.
+        Kind::String
+            if field.schema["maxLength"]
+                .as_u64()
+                .is_some_and(|max| max > 200) =>
+        {
+            let max = field.schema["maxLength"]
+                .as_u64()
+                .map_or_else(String::new, |v| format!(" maxlength=\"{v}\""));
+            format!(
+                "<textarea {attrs} rows=\"4\"{max}>{}</textarea>",
+                escape(value)
+            )
+        }
         Kind::String | Kind::Roles => {
             let pattern = field.schema["pattern"]
                 .as_str()

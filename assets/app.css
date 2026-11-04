@@ -104,6 +104,10 @@ h1.with-icon { display:flex; align-items:center; gap:10px; }
 form:not(:has(input[name="f.timeout_method"][value="role"]:checked)) .when[data-when="timeout_method=role"],
 form:not(:has(input[name="f.voice_mute_method"][value="role"]:checked)) .when[data-when="voice_mute_method=role"] { display:none; }
 .settings-control { display:flex; justify-content:flex-end; min-inline-size:0; }
+.settings-row:has(textarea) { grid-template-columns:minmax(0,1fr); }
+.settings-row:has(textarea) .settings-control { justify-content:stretch; }
+.settings-control textarea { inline-size:100%; min-block-size:88px; resize:vertical; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text); font:inherit; padding:8px 10px; }
+.settings-control textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .settings-control input:not(.switch),.settings-control select { min-inline-size:0; max-inline-size:100%; block-size:32px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text); font:inherit; padding-inline:10px; }
 .settings-control input[type=checkbox].switch { appearance:none; flex:none; cursor:pointer; }
 .settings-control input.switch:checked { background:var(--on); }

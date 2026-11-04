@@ -332,6 +332,9 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             Some(json!(values))
         }
         Kind::String | Kind::Enum(_) => {
+            // A text area sends its line breaks as CR LF; the bot keeps plain LF.
+            let normalized = input.replace("\r\n", "\n");
+            let input = normalized.as_str();
             if let Kind::Enum(values) = &field.kind
                 && !values.iter().any(|v| v == input)
             {
@@ -460,6 +463,19 @@ mod tests {
         let mut parts = ["ban", "voice", "other", "timeout", "warn"];
         parts.sort_by_key(|p| section_rank(p));
         assert_eq!(parts, ["warn", "timeout", "voice", "ban", "other"]);
+    }
+    #[test]
+    fn a_text_area_keeps_its_lines_as_plain_line_feeds() {
+        let module = json!({"properties":{"config":{"properties":{
+            "greeting":{"type":["string","null"],"maxLength":2000}
+        }}}});
+        let fields = fields(&module);
+        let greeting = fields.iter().find(|f| f.name == "greeting").unwrap();
+        assert_eq!(
+            parse(greeting, "Hi {user}\r\nWelcome"),
+            Some(json!("Hi {user}\nWelcome"))
+        );
+        assert_eq!(parse(greeting, ""), Some(Value::Null));
     }
     #[test]
     fn settings_schema_and_roles() {
