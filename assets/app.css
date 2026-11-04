@@ -1,9 +1,9 @@
 :root {
   color-scheme: light;
   --bg:#f7f7f8; --surface:#fff; --field:#f1f1f3; --line:rgba(0,0,0,.08);
-  --text:#18181b; --muted:#6b6b76; --accent:#4f46e5; --accent-soft:#eef0ff; --accent-text:#4338ca;
+  --text:#18181b; --muted:#6b6b76; --accent:#2a78d6; --accent-soft:#e8f1fc; --accent-text:#1c5cab;
   --primary:#18181b; --primary-text:#fff; --ok:#16a34a; --ok-bg:#e8f7ee; --ok-text:#15803d;
-  --warn:#92400e; --warn-bg:#fffbeb; --on:#4f46e5; --off:#d4d4d8;
+  --warn:#92400e; --warn-bg:#fffbeb; --on:#2a78d6; --off:#d4d4d8;
   --glass:rgba(247,247,248,.72); --active:rgba(0,0,0,.05);
   --shadow:0 1px 2px rgba(0,0,0,.04); --shadow-float:0 12px 32px rgba(0,0,0,.12);
   --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100; --series-5:#e87ba4;
@@ -20,9 +20,9 @@
   :root {
     color-scheme:dark;
     --bg:#09090b; --surface:#131316; --field:#1f1f23; --line:rgba(255,255,255,.08);
-    --text:#fafafa; --muted:#a1a1aa; --accent:#6366f1; --accent-soft:rgba(99,102,241,.18); --accent-text:#a5b4fc;
+    --text:#fafafa; --muted:#a1a1aa; --accent:#3987e5; --accent-soft:rgba(57,135,229,.18); --accent-text:#86b6ef;
     --primary:#fafafa; --primary-text:#09090b; --ok:#34d399; --ok-bg:rgba(52,211,153,.14); --ok-text:#6ee7b7;
-    --warn:#fcd34d; --warn-bg:rgba(245,158,11,.10); --on:#6366f1; --off:#3f3f46;
+    --warn:#fcd34d; --warn-bg:rgba(245,158,11,.10); --on:#3987e5; --off:#3f3f46;
     --glass:rgba(9,9,11,.72); --active:rgba(255,255,255,.07); --shadow:none; --shadow-float:0 12px 32px rgba(0,0,0,.5);
     --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500; --series-5:#d55181;
   }
@@ -70,7 +70,7 @@ nav a[aria-current=page] { font-weight:600; }
 .panel h2 { padding:12px 16px; border-block-end:1px solid var(--line); }
 .module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; list-style:none; padding:0; margin:0; }
 .module-tile { display:flex; flex-direction:column; gap:10px; min-inline-size:0; padding:14px; }
-.module-tile.disabled { background:var(--field); }
+.module-tile.disabled .module-title,.module-tile.disabled .module-description { opacity:.5; }
 .module-tile:hover,.module-tile:focus-within { border-color:var(--accent); }
 .module-tile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .module-name { min-inline-size:0; font-weight:600; overflow-wrap:anywhere; }
@@ -78,7 +78,7 @@ nav a[aria-current=page] { font-weight:600; }
 .module-section h2 { font-size:14px; font-weight:600; color:var(--muted); }
 .module-title { display:flex; align-items:center; gap:8px; min-inline-size:0; }
 .module-icon { flex:none; inline-size:28px; block-size:28px; padding:4px; box-sizing:border-box; border-radius:8px; background:var(--accent-soft); color:var(--accent-text); }
-.module-tile.disabled .module-icon { background:var(--line); color:var(--muted); }
+.module-tile.disabled .module-icon { background:var(--field); color:var(--muted); }
 h1.with-icon { display:flex; align-items:center; gap:10px; }
 .module-tile-heading form { flex:none; }
 .module-action { margin-block-start:auto; min-block-size:36px; }

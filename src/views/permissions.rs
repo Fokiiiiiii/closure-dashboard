@@ -58,6 +58,7 @@ pub(crate) fn permissions(
                 .and_then(|r| r["color"].as_u64())
                 .unwrap_or(0)
                 .min(0xff_ffff);
+            let fill = super::role_fill(color);
             let level = if level.is_null() {
                 "—".into()
             } else {
@@ -68,7 +69,7 @@ pub(crate) fn permissions(
             let width = level.parse::<u64>().unwrap_or(0).min(100);
             let _ = write!(
                 body,
-                "<tr><td><svg class=\"role-dot\" viewBox=\"0 0 10 10\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"5\" r=\"5\" fill=\"#{color:06x}\"/></svg> {}</td><td><svg class=\"level-bar\" viewBox=\"0 0 100 6\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><rect class=\"bar-background\" width=\"100\" height=\"6\" rx=\"3\"/><rect class=\"bar-fill\" width=\"{width}\" height=\"6\" rx=\"3\"/></svg></td><td>{}</td><td class=\"mono\">{source}</td></tr>",
+                "<tr><td><svg class=\"role-dot\" viewBox=\"0 0 10 10\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"5\" r=\"5\" fill=\"{fill}\"/></svg> {}</td><td><svg class=\"level-bar\" viewBox=\"0 0 100 6\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><rect class=\"bar-background\" width=\"100\" height=\"6\" rx=\"3\"/><rect class=\"bar-fill\" width=\"{width}\" height=\"6\" rx=\"3\"/></svg></td><td>{}</td><td class=\"mono\">{source}</td></tr>",
                 escape(role_name),
                 escape(&level)
             );

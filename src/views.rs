@@ -81,6 +81,15 @@ mod overview;
 mod permissions;
 mod settings;
 
+/// The fill of a role's dot: its Discord colour, or the text colour for a role that has none.
+fn role_fill(color: u64) -> String {
+    if color == 0 {
+        "currentColor".into()
+    } else {
+        format!("#{color:06x}")
+    }
+}
+
 fn first_sentence(description: &str) -> String {
     let description = description.trim_start();
     let end = description.find('。').map(|i| i + '。'.len_utf8());

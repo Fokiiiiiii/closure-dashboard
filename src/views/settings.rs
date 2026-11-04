@@ -69,9 +69,10 @@ fn roles(
             found.push(role_id);
         }
         let color = role["color"].as_u64().unwrap_or(0).min(0xFF_FFFF);
+        let fill = super::role_fill(color);
         let _ = write!(
             out,
-            "<label class=\"role-option\"><input type=\"checkbox\" name=\"f.moderator_roles\" value=\"{}\"{}><svg aria-hidden=\"true\" width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#{color:06x}\"/></svg>{}</label>",
+            "<label class=\"role-option\"><input type=\"checkbox\" name=\"f.moderator_roles\" value=\"{}\"{}><svg aria-hidden=\"true\" width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"{fill}\"/></svg>{}</label>",
             escape(role_id),
             if checked { " checked" } else { "" },
             escape(role["name"].as_str().unwrap_or(role_id))
