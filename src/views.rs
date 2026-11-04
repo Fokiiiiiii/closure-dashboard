@@ -1,12 +1,10 @@
 use std::fmt::Write;
 
 use axum::http::HeaderMap;
-use serde_json::Value;
 
 use crate::{
     html::escape,
     i18n::{Locale, keys},
-    session,
 };
 
 fn theme(headers: &HeaderMap) -> &str {
@@ -131,133 +129,69 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
     page(l, headers, &body)
 }
 
-fn sidebar(l: Locale<'_>, headers: &HeaderMap, id: &str, name: &str) -> String {
-    format!(
-        "<aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">⌄</span></div><nav aria-label=\"{}\"><a href=\"/g/{}\" aria-current=\"page\"><svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 11l8-7 8 7v9H4z\"/></svg>{}</a></nav><div class=\"sidebar-footer\">{}{}</div></aside>",
-        avatar(name),
-        escape(name),
-        l.text(keys::NAVIGATION),
-        escape(id),
-        l.text(keys::OVERVIEW),
-        segmented(l, headers),
-        logout(l)
-    )
-}
+mod charts;
+mod history;
+mod overview;
+mod permissions;
 
-pub(crate) fn overview(
+pub(crate) use history::history;
+pub(crate) use overview::overview;
+pub(crate) use permissions::permissions;
+
+fn shell(
     l: Locale<'_>,
     headers: &HeaderMap,
     id: &str,
     name: &str,
-    modules: &serde_json::Map<String, Value>,
-    effective: &Value,
-    history: &[Value],
+    current: &str,
+    content: &str,
 ) -> String {
-    let active = modules
-        .keys()
-        .filter(|k| effective["modules"][*k]["enabled"] == true)
-        .count();
-    let last = history
-        .first()
-        .and_then(|v| v["created_at_unix"].as_i64())
-        .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()));
-    let mut body = format!(
-        "<div class=\"shell\">{}<div class=\"workspace\"><div class=\"breadcrumb\">{} / {}</div><main class=\"content\"><h1>{}</h1><section class=\"stats\" aria-label=\"{}\"><div class=\"card stat\"><div>{}</div><strong><span class=\"dot\"></span>{}</strong></div><div class=\"card stat\"><div>{}</div><strong>{active}<span class=\"muted\"> / {}</span></strong></div><div class=\"card stat\"><div>{}</div><strong>{last}</strong></div></section><section class=\"card panel\"><h2>{}</h2><div class=\"module-heading\"><span>{}</span><span>{}</span><span></span></div><ul class=\"rows\">",
-        sidebar(l, headers, id, name),
-        escape(name),
-        l.text(keys::OVERVIEW),
-        l.text(keys::OVERVIEW),
-        l.text(keys::STATUS),
-        l.text(keys::BOT),
-        l.text(keys::CONNECTED),
-        l.text(keys::ACTIVE),
-        modules.len(),
-        l.text(keys::LAST),
-        l.text(keys::MODULES),
-        l.text(keys::NAME),
-        l.text(keys::STATUS)
-    );
-    for (module, def) in modules {
-        if !super::routes::valid_module(module) {
-            continue;
-        }
-        let title = def["title"].as_str().unwrap_or(module);
-        let enabled = effective["modules"][module]["enabled"] == true;
+    let mut nav = String::new();
+    for (path, key, icon) in [
+        ("", keys::OVERVIEW, "M4 11l8-7 8 7v9H4z"),
+        (
+            "/history",
+            keys::HISTORY,
+            "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
+        ),
+        (
+            "/permissions",
+            keys::PERMISSIONS,
+            "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
+        ),
+    ] {
+        let active = if key == current {
+            " aria-current=\"page\""
+        } else {
+            ""
+        };
         let _ = write!(
-            body,
-            "<li class=\"module-row\"><span class=\"module-name\">{}</span><span class=\"pill {}\">{}</span><form method=\"post\" action=\"/g/{}/modules/{}/toggle\"><input type=\"hidden\" name=\"enabled\" value=\"{}\"><button class=\"switch\" type=\"submit\" role=\"switch\" aria-checked=\"{enabled}\" aria-label=\"{}\"></button></form></li>",
-            escape(title),
-            if enabled { "enabled" } else { "disabled" },
-            l.text(if enabled {
-                keys::ENABLED
-            } else {
-                keys::DISABLED
-            }),
+            nav,
+            "<a href=\"/g/{}{path}\"{active}><svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{icon}\"/></svg>{}</a>",
             escape(id),
-            escape(module),
-            !enabled,
-            escape(title)
+            l.text(key)
         );
     }
-    let _ = write!(
-        body,
-        "</ul></section><section class=\"card panel\"><h2>{}</h2><ul class=\"rows\">",
-        l.text(keys::RECENT)
-    );
-    if history.is_empty() {
-        let _ = write!(body, "<li class=\"empty\">{}</li>", l.text(keys::NONE));
-    }
-    for item in history.iter().take(4) {
-        let when = item["created_at_unix"]
-            .as_i64()
-            .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()));
-        let _ = write!(
-            body,
-            "<li class=\"history-row\"><span>{}</span><span>{when}</span></li>",
-            escape(item["actor"].as_str().unwrap_or("—"))
-        );
-    }
-    body.push_str("</ul></section></main></div></div>");
-    page(l, headers, &body)
+    page(
+        l,
+        headers,
+        &format!(
+            "<div class=\"shell\"><aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">⌄</span></div><nav aria-label=\"{}\">{nav}</nav><div class=\"sidebar-footer\">{}{}</div></aside><div class=\"workspace\"><div class=\"breadcrumb\">{} / {}</div><main class=\"content\">{content}</main></div></div>",
+            avatar(name),
+            escape(name),
+            l.text(keys::NAVIGATION),
+            segmented(l, headers),
+            logout(l),
+            escape(name),
+            l.text(current)
+        ),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::i18n::{Catalogs, REGISTRY};
-    use serde_json::json;
-
-    #[test]
-    fn overview_switches_and_navigation() {
-        let catalogs = Catalogs::new(REGISTRY).unwrap();
-        let modules = json!({"on":{"title":"On"}, "off":{"title":"<Off>"}});
-        let html = overview(
-            catalogs.locale("ja"),
-            &HeaderMap::new(),
-            "42",
-            "<script>",
-            modules.as_object().unwrap(),
-            &json!({"modules":{"on":{"enabled":true},"off":{"enabled":false}}}),
-            &[],
-        );
-        for expected in [
-            "action=\"/g/42/modules/on/toggle\"><input type=\"hidden\" name=\"enabled\" value=\"false\"",
-            "action=\"/g/42/modules/off/toggle\"><input type=\"hidden\" name=\"enabled\" value=\"true\"",
-            "role=\"switch\" aria-checked=\"true\" aria-label=\"On\"",
-            "role=\"switch\" aria-checked=\"false\" aria-label=\"&lt;Off&gt;\"",
-            "class=\"pill enabled\"",
-            "class=\"pill disabled\"",
-            "<nav aria-label=",
-            "aria-current=\"page\"",
-            "&lt;script&gt;",
-            "変更はありません",
-        ] {
-            assert!(html.contains(expected), "{expected}");
-        }
-        for forbidden in ["href=\"#\"", "<script>", "style=", "<select", "<header>"] {
-            assert!(!html.contains(forbidden), "{forbidden}");
-        }
-    }
 
     #[test]
     fn segments_and_card_pages() {
@@ -292,7 +226,7 @@ mod tests {
     #[test]
     fn stylesheet_constraints() {
         let css = include_str!("../assets/app.css");
-        assert!(css.len() <= 10_240);
+        assert!(css.len() <= 16_384);
         for forbidden in [
             "http:",
             "https:",
@@ -307,6 +241,15 @@ mod tests {
             "transition:all",
         ] {
             assert!(!css.contains(forbidden), "{forbidden}");
+        }
+        for (light, dark) in [
+            ("#2a78d6", "#3987e5"),
+            ("#eb6834", "#d95926"),
+            ("#1baf7a", "#199e70"),
+            ("#eda100", "#c98500"),
+            ("#e87ba4", "#d55181"),
+        ] {
+            assert!(css.contains(light) && css.contains(dark));
         }
     }
 }

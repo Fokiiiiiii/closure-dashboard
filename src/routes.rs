@@ -51,6 +51,8 @@ pub fn router(config: Config) -> Router {
         .route("/theme", post(theme))
         .route("/lang", post(set_language))
         .route("/g/{id}", get(guild))
+        .route("/g/{id}/history", get(history_page))
+        .route("/g/{id}/permissions", get(permissions_page))
         .route("/g/{id}/modules/{module}/toggle", post(toggle))
         .route("/healthz", get(|| async { "ok" }))
         .route(
@@ -485,39 +487,78 @@ fn module_names(schema: &Value) -> serde_json::Map<String, Value> {
         .cloned()
         .unwrap_or_default()
 }
-async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+async fn guild(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let days = query
+        .get("days")
+        .and_then(|v| v.parse::<u8>().ok())
+        .filter(|n| [7, 14, 30].contains(n))
+        .unwrap_or(7);
     let l = lang(&headers, &app);
-    let (guilds, effective, history, schema) = tokio::join!(
-        app.api.guilds(),
-        app.api.effective(&id),
-        app.api.history(&id),
-        app.api.schema(l.bot_language())
-    );
-    let (guilds, effective, history, schema) = match (guilds, effective, history, schema) {
-        (Ok((guilds, _)), Ok((effective, _)), Ok((history, _)), Ok((schema, _))) => {
-            (guilds, effective, history, schema)
-        }
-        (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => {
-            return api_error(&e, l, &headers);
-        }
+    let (guilds, stats) = tokio::join!(app.api.guilds(), app.api.stats(&id, days));
+    let guilds = match guilds {
+        Ok((v, _)) => v,
+        Err(e) => return api_error(&e, l, &headers),
     };
-    let name = guilds
-        .as_array()
-        .and_then(|a| a.iter().find(|g| g["id"] == id))
-        .and_then(|g| g["name"].as_str())
-        .unwrap_or(&id);
-    let modules = module_names(&schema);
-    let history_items = history.as_array().cloned().unwrap_or_default();
+    let name = guild_name(&guilds, &id);
     Html(views::overview(
         l,
         &headers,
         &id,
         name,
-        &modules,
-        &effective,
-        &history_items,
+        days,
+        stats.ok().map(|v| v.0).as_ref(),
     ))
     .into_response()
+}
+fn guild_name<'a>(guilds: &'a Value, id: &'a str) -> &'a str {
+    guilds
+        .as_array()
+        .and_then(|a| a.iter().find(|g| g["id"] == id))
+        .and_then(|g| g["name"].as_str())
+        .unwrap_or(id)
+}
+async fn history_page(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let l = lang(&headers, &app);
+    let (guilds, history) = tokio::join!(app.api.guilds(), app.api.history(&id));
+    match (guilds, history) {
+        (Ok((g, _)), Ok((h, _))) => {
+            Html(views::history(l, &headers, &id, guild_name(&g, &id), &h)).into_response()
+        }
+        (Err(e), _) | (_, Err(e)) => api_error(&e, l, &headers),
+    }
+}
+async fn permissions_page(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let l = lang(&headers, &app);
+    let (guilds, effective, directory) = tokio::join!(
+        app.api.guilds(),
+        app.api.effective(&id),
+        app.api.directory(&id)
+    );
+    match (guilds, effective, directory) {
+        (Ok((g, _)), Ok((e, _)), Ok((d, _))) => Html(views::permissions(
+            l,
+            &headers,
+            &id,
+            guild_name(&g, &id),
+            &e,
+            &d,
+        ))
+        .into_response(),
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => api_error(&e, l, &headers),
+    }
 }
 pub(crate) fn valid_module(s: &str) -> bool {
     !s.is_empty()

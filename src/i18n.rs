@@ -23,7 +23,22 @@ pub mod keys {
         AUTO = "auto", LIGHT = "light", DARK = "dark", APPLY = "apply",
         LANGUAGE = "language", TIME_NOW = "time-now", TIME_YESTERDAY = "time-yesterday",
         TIME_MINUTE = "time-minute", TIME_HOUR = "time-hour", TIME_DAY = "time-day",
-        NAME = "name", STATUS = "status", NAVIGATION = "navigation"
+        NAME = "name", STATUS = "status", NAVIGATION = "navigation",
+        HISTORY = "history", PERMISSIONS = "permissions", PERIOD = "period",
+        DAYS = "days", SUMMARY = "summary", MEMBERS = "members", JOINS = "joins",
+        LEAVES = "leaves", MESSAGES = "messages", MODERATION = "moderation",
+        AVERAGE = "average", CHARTS = "charts", JOIN_LEAVE = "join-leave",
+        NO_DATA = "no-data", STATS_FAILED = "stats-failed", RETENTION = "retention",
+        OTHER = "other", TABLE_VIEW = "table-view", DATE = "date", COUNT = "count",
+        LOG = "log", NEWEST = "newest", NUMBER = "number", KIND = "kind",
+        TARGET = "target", MODERATOR = "moderator", REASON = "reason", TIME = "time",
+        REVOKED = "revoked", INITIAL = "initial", NO_CHANGE = "no-change",
+        MORE = "more", CHANGE = "change", ACTOR = "actor", REVISION = "revision",
+        HISTORY_NOTE = "history-note", READ_ONLY = "read-only", ROLES = "roles",
+        LEVEL = "level", VALUE = "value", SOURCE = "source", ROLE_EMPTY = "role-empty",
+        USER_ASSIGNMENTS = "user-assignments", KEY_OVERRIDES = "key-overrides",
+        WARN_KIND = "warn-kind", TIMEOUT_KIND = "timeout-kind", KICK_KIND = "kick-kind",
+        BAN_KIND = "ban-kind", VCMUTE_KIND = "vcmute-kind"
     }
 }
 
@@ -33,6 +48,21 @@ pub struct Definition {
     pub name: &'static str,
     pub dir: &'static str,
     pub source: &'static str,
+}
+
+/// Groups digits by thousands.
+// shortcut: a comma for every locale (ja and en agree); when a locale needs another separator, move it into `Definition`.
+#[must_use]
+pub fn group_digits(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 pub const REGISTRY: &[Definition] = &[
@@ -349,6 +379,18 @@ mod tests {
                 "{}",
                 definition.tag
             );
+        }
+    }
+    #[test]
+    fn digits_are_grouped_by_thousands() {
+        for (n, expected) in [
+            (0, "0"),
+            (999, "999"),
+            (1000, "1,000"),
+            (1284, "1,284"),
+            (1_234_567, "1,234,567"),
+        ] {
+            assert_eq!(group_digits(n), expected);
         }
     }
     #[test]

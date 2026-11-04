@@ -228,7 +228,31 @@ impl Api {
     pub async fn history(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
         self.request(
             Method::GET,
-            &format!("/v1/guilds/{guild}/config/history?limit=4"),
+            &format!("/v1/guilds/{guild}/config/history?limit=50"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn stats(&self, guild: &str, days: u8) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/stats?days={days}"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn directory(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/directory"),
             None,
             None,
             None,

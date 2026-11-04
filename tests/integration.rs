@@ -112,9 +112,13 @@ struct Fake {
     always_conflict: bool,
     put_forbidden: bool,
     invalid_schema: bool,
+    stats_status: Option<StatusCode>,
+    assigned: bool,
+    queries: Vec<String>,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
+    let query = request.uri().query().unwrap_or("").to_owned();
     let method = request.method().clone();
     let auth = request
         .headers()
@@ -136,9 +140,15 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         .to_owned();
     let body = to_bytes(request.into_body(), 65536).await.unwrap();
     let mut fake = state.lock().unwrap();
+    fake.queries.push(format!("{path}?{query}"));
     fake.calls.push((path.clone(), auth, etag, actor));
     if let Some(status) = fake.status {
         return (status, [(header::ETAG, "\"1\"")], json!({"error":{"code":"secret-token", "message":"secret-token", "issues":[{"path":"x", "code":"x", "message":"secret-token"}]}}).to_string());
+    }
+    if path.ends_with("/stats")
+        && let Some(status) = fake.stats_status
+    {
+        return (status, [(header::ETAG, "\"1\"")], "{}".into());
     }
     let value = if path.ends_with("/access/123") {
         json!({"allowed":!fake.denied})
@@ -186,9 +196,17 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     } else if path.ends_with("/config") {
         json!({"preset":"latest","modules":{"mod":{"other":1}}})
     } else if path.ends_with("/effective") {
-        json!({"modules":{"mod":{"enabled":false}}})
+        if fake.assigned {
+            json!({"moderator_roles":[{"id":"10","level":"moderator"}],"permissions":{"roles":{"11":50},"users":{"12":5},"keys":{"ban":3}}})
+        } else {
+            json!({"moderator_roles":[],"permissions":{}})
+        }
+    } else if path.ends_with("/directory") {
+        json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path.ends_with("/stats") {
+        json!({"members":{"total":1284,"joins":5,"leaves":2,"by_day":[{"date":"2026-11-03","joins":null,"leaves":null},{"date":"2026-11-04","joins":5,"leaves":2}]},"messages":{"retention_days":7,"total":123,"by_day":[{"date":"2026-11-03","count":null},{"date":"2026-11-04","count":123}]},"cases":{"total":3,"by_day":[{"date":"2026-11-04","kinds":{"warn":2,"<script>":1}}],"recent":[{"number":12,"kind":"<script>","target":"<script>","moderator":"<script>","reason":"<script>","created_at_unix":1793790842,"revoked":true}]}})
     } else if path.ends_with("/history") {
-        json!([{"actor":"moderator", "created_at_unix": session::now() - 7200}])
+        json!([{"revision":2,"actor":"<script>","document":{"modules":{"channels":{"enabled":true}}},"created_at_unix":session::now()-7200},{"revision":1,"actor":"moderator","document":{"modules":{"channels":{"enabled":false}}},"created_at_unix":session::now()-7200}])
     } else {
         json!([])
     };
@@ -257,6 +275,160 @@ api_get_test!(
 );
 api_get_test!(api_history, history("42"), "/v1/guilds/42/config/history");
 api_get_test!(api_config, config("42"), "/v1/guilds/42/config");
+api_get_test!(api_stats, stats("42", 7), "/v1/guilds/42/stats");
+api_get_test!(api_directory, directory("42"), "/v1/guilds/42/directory");
+
+#[tokio::test]
+async fn statistics_render_and_validate_periods() {
+    let (config, state) = setup().await;
+    for (query, days) in [
+        ("", 7),
+        ("?days=14", 14),
+        ("?days=30", 30),
+        ("?days=8", 7),
+        ("?days=bad", 7),
+    ] {
+        let response = router(config.clone())
+            .oneshot(request(&config, Method::GET, &format!("/g/42{query}"), ""))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), 131072)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        for expected in [
+            "1,284",
+            "+3",
+            "123",
+            "role=\"img\"",
+            "<title",
+            "<details>",
+            "表で見る",
+            "series-1",
+            "series-6",
+            "その他",
+            "&lt;script&gt;",
+            "title=\"&lt;script&gt;\"",
+            "取り消し済み",
+        ] {
+            assert!(html.contains(expected), "{expected}");
+        }
+        for forbidden in ["<script>", "style=", "モジュール", "Bot", "最後の変更"] {
+            assert!(!html.contains(forbidden), "{forbidden}");
+        }
+        assert!(html.contains(&format!("?days={days}\" aria-current=\"true\"")));
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .queries
+                .iter()
+                .any(|q| q == &format!("/v1/guilds/42/stats?days={days}"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn statistics_failure_preserves_shell() {
+    let (config, state) = setup().await;
+    for status in [StatusCode::NOT_FOUND, StatusCode::SERVICE_UNAVAILABLE] {
+        state.lock().unwrap().stats_status = Some(status);
+        let response = router(config.clone())
+            .oneshot(request(&config, Method::GET, "/g/42?days=14", ""))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        for expected in [
+            "統計を取得できません",
+            "履歴",
+            "権限",
+            "?days=14",
+            "aria-current=\"page\"",
+        ] {
+            assert!(html.contains(expected), "{expected}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn history_and_permissions_render() {
+    let (config, state) = setup().await;
+    let anonymous = router(config.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/g/42/history")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::SEE_OTHER);
+    for (path, expected) in [
+        (
+            "/g/42/history",
+            vec![
+                "modules.channels.enabled",
+                "false → true",
+                "初期設定",
+                "&lt;script&gt;",
+            ],
+        ),
+        (
+            "/g/42/permissions",
+            vec!["ロールの割り当てはありません", "閲覧のみ"],
+        ),
+    ] {
+        let response = router(config.clone())
+            .oneshot(request(&config, Method::GET, path, ""))
+            .await
+            .unwrap();
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        for value in expected {
+            assert!(html.contains(value), "{value}");
+        }
+        assert!(!html.contains("<script>"));
+        assert!(!html.contains("style="));
+    }
+    state.lock().unwrap().assigned = true;
+    let response = router(config.clone())
+        .oneshot(request(&config, Method::GET, "/g/42/permissions", ""))
+        .await
+        .unwrap();
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    for expected in [
+        "moderator_roles",
+        "permissions.roles",
+        "moderator",
+        "50",
+        "&lt;script&gt;",
+        "ユーザー個別の割り当て",
+    ] {
+        assert!(html.contains(expected), "{expected}");
+    }
+}
 
 #[tokio::test]
 async fn api_put_config_sends_precondition_and_actor() {
@@ -288,8 +460,8 @@ async fn access_retry_actor_and_html() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     assert!(!html.contains("<script>"));
-    assert!(html.contains("&lt;Mod&gt;"));
-    assert_eq!(html.matches("2 時間前").count(), 2);
+    assert!(html.contains("1,284"));
+    assert!(!html.contains("&lt;Mod&gt;"));
     let response = router(config.clone())
         .oneshot(request(
             &config,
@@ -583,254 +755,5 @@ async fn state_cookie_has_security_attributes() {
     }
 }
 
-#[tokio::test]
-async fn guild_access_is_not_cached() {
-    let (config, state) = setup().await;
-    for _ in 0..2 {
-        assert_eq!(
-            router(config.clone())
-                .oneshot(request(&config, Method::GET, "/g/42", ""))
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::OK
-        );
-    }
-    assert_eq!(
-        state
-            .lock()
-            .unwrap()
-            .calls
-            .iter()
-            .filter(|call| call.0.ends_with("/access/123"))
-            .count(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn access_errors_show_localized_messages() {
-    let (config, state) = setup().await;
-    for (status, message) in [
-        (403, "このサーバーへのアクセス権がありません"),
-        (404, "このサーバーには参加していません"),
-        (503, "Bot に接続できません"),
-    ] {
-        state.lock().unwrap().status = Some(StatusCode::from_u16(status).unwrap());
-        let response = router(config.clone())
-            .oneshot(request(&config, Method::GET, "/g/42", ""))
-            .await
-            .unwrap();
-        let body = to_bytes(response.into_body(), 65536).await.unwrap();
-        let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(body.contains(message));
-        assert!(!body.contains("secret-token"));
-    }
-}
-
-#[tokio::test]
-async fn retry_stops_after_second_conflict() {
-    let (config, state) = setup().await;
-    state.lock().unwrap().always_conflict = true;
-    let response = router(config.clone())
-        .oneshot(request(
-            &config,
-            Method::POST,
-            "/g/42/modules/mod/toggle",
-            "enabled=true",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
-    assert_eq!(state.lock().unwrap().puts, 2);
-}
-
-#[tokio::test]
-async fn toggle_forbidden_is_shown() {
-    let (config, state) = setup().await;
-    state.lock().unwrap().put_forbidden = true;
-    let response = router(config.clone())
-        .oneshot(request(
-            &config,
-            Method::POST,
-            "/g/42/modules/mod/toggle",
-            "enabled=true",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let body = to_bytes(response.into_body(), 65536).await.unwrap();
-    assert!(
-        String::from_utf8(body.to_vec())
-            .unwrap()
-            .contains("このサーバーへのアクセス権がありません")
-    );
-}
-
-#[tokio::test]
-async fn invalid_guild_and_module_are_rejected() {
-    let (config, state) = setup().await;
-    state.lock().unwrap().invalid_schema = true;
-    for path in [
-        "/g/not-a-number",
-        "/g/42/modules/bad%21/toggle",
-        "/g/42/modules/missing/toggle",
-    ] {
-        let method = if path.contains("toggle") {
-            Method::POST
-        } else {
-            Method::GET
-        };
-        assert_eq!(
-            router(config.clone())
-                .oneshot(request(&config, method, path, "enabled=true"))
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::BAD_REQUEST
-        );
-    }
-}
-
-#[tokio::test]
-async fn security_headers_cover_success_redirect_and_errors() {
-    let (config, _) = setup().await;
-    for path in ["/healthz", "/", "/auth/callback?state=wrong", "/missing"] {
-        let response = router(config.clone())
-            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        for name in [
-            header::CACHE_CONTROL,
-            header::X_CONTENT_TYPE_OPTIONS,
-            header::REFERRER_POLICY,
-            header::CONTENT_SECURITY_POLICY,
-        ] {
-            assert!(response.headers().contains_key(&name), "{path} {name}");
-        }
-    }
-}
-
-#[tokio::test]
-async fn logout_clears_session_cookie() {
-    let (config, _) = setup().await;
-    let response = router(config.clone())
-        .oneshot(request(&config, Method::POST, "/logout", ""))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
-    assert!(cookie.starts_with("session=;"));
-    assert!(cookie.contains("Max-Age=0"));
-}
-
-#[tokio::test]
-async fn index_redirects_one_and_displays_empty() {
-    let (config, state) = setup().await;
-    let response = router(config.clone())
-        .oneshot(request(&config, Method::GET, "/", ""))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(response.headers()[header::LOCATION], "/g/42");
-    state.lock().unwrap().empty = true;
-    let response = router(config.clone())
-        .oneshot(request(&config, Method::GET, "/", ""))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        String::from_utf8(
-            to_bytes(response.into_body(), 65536)
-                .await
-                .unwrap()
-                .to_vec()
-        )
-        .unwrap()
-        .contains("利用できるサーバーはありません")
-    );
-}
-
-#[tokio::test]
-async fn theme_cookie_changes_rendered_theme() {
-    let (config, _) = setup().await;
-    let response = router(config.clone())
-        .oneshot(request(&config, Method::POST, "/theme", "theme=dark"))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    let cookie = response.headers()[header::SET_COOKIE]
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_owned();
-    assert_eq!(cookie, "theme=dark");
-    let response = router(config)
-        .oneshot(
-            Request::builder()
-                .uri("/login")
-                .header(header::COOKIE, cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert!(
-        String::from_utf8(
-            to_bytes(response.into_body(), 65536)
-                .await
-                .unwrap()
-                .to_vec()
-        )
-        .unwrap()
-        .contains("data-theme=\"dark\"")
-    );
-}
-
-#[tokio::test]
-async fn error_and_public_theme_preserve_cookie() {
-    let (config, _) = setup().await;
-    let response = router(config.clone())
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/theme")
-                .header(header::ORIGIN, "http://localhost")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from("theme=dark"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert!(
-        response.headers()[header::SET_COOKIE]
-            .to_str()
-            .unwrap()
-            .starts_with("theme=dark")
-    );
-    let response = router(config)
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/lang")
-                .header(header::COOKIE, "theme=dark")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), 65536)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(body.contains("data-theme=\"dark\""));
-    assert!(body.contains("role=\"alert\""));
-    assert!(!body.contains("style="));
-}
+#[path = "integration/remaining.rs"]
+mod remaining;
