@@ -734,6 +734,27 @@ async fn anonymous_routes_redirect_to_login() {
 }
 
 #[tokio::test]
+async fn login_goes_straight_to_discord_unless_the_dev_login_is_on() {
+    let (mut config, _) = setup().await;
+    let anonymous = || {
+        Request::builder()
+            .uri("/login")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = router(config.clone()).oneshot(anonymous()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let signed_in = request(&config, Method::GET, "/login", "");
+    let response = router(config.clone()).oneshot(signed_in).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/");
+    config.dev_user = None;
+    let response = router(config.clone()).oneshot(anonymous()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/auth/discord");
+}
+
+#[tokio::test]
 async fn referer_and_origin_must_match() {
     let (config, _) = setup().await;
     for (origin, referer) in [
