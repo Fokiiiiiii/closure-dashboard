@@ -194,7 +194,8 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         .as_bool()
         .unwrap_or(false);
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1>{}</header>",
+        "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1>{}</header>",
+        super::modules::module_icon(module),
         escape(title),
         toggle(l, id, module, enabled)
     );

@@ -23,6 +23,27 @@ pub(super) fn toggle(l: Locale<'_>, id: &str, module: &str, enabled: bool) -> St
     )
 }
 
+/// A small line icon that says what a module is for; a plain box for one the dashboard does not know.
+pub(super) fn module_icon(module: &str) -> String {
+    let path = match module {
+        "automod" => "M13 2L4 14h7l-1 8 9-12h-7z",
+        "channels" => "M5 9h14M5 15h14M10 4L8 20M16 4l-2 16",
+        "dashboard" => "M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z",
+        "diagnostics" => "M3 12h4l3-8 4 16 3-8h4",
+        "logs" => "M7 3h8l4 4v14H7zM15 3v4h4M10 12h6M10 16h6",
+        "moderation" => "M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6zM9 12l2 2 4-4",
+        "remind" => "M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0",
+        "tags" => "M3 12V4h8l10 10-8 8zM7.5 8h.01",
+        "welcome" => {
+            "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"
+        }
+        _ => "M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5",
+    };
+    format!(
+        "<svg class=\"module-icon\" aria-hidden=\"true\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>"
+    )
+}
+
 pub(crate) fn modules_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -56,8 +77,9 @@ pub(crate) fn modules_page(
         };
         let _ = write!(
             body,
-            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-name\">{}</span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
+            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
             if enabled { "enabled" } else { "disabled" },
+            module_icon(&module),
             escape(title),
             toggle(l, id, &module, enabled),
             escape(description),
@@ -73,6 +95,33 @@ mod tests {
     use super::*;
     use crate::i18n::{Catalogs, REGISTRY};
     use serde_json::json;
+
+    #[test]
+    fn every_known_module_has_its_own_icon_and_unknown_ones_a_plain_box() {
+        let known = [
+            "automod",
+            "channels",
+            "dashboard",
+            "diagnostics",
+            "logs",
+            "moderation",
+            "remind",
+            "tags",
+            "welcome",
+        ];
+        let icons: Vec<String> = known.iter().map(|m| module_icon(m)).collect();
+        for (i, icon) in icons.iter().enumerate() {
+            assert!(icon.contains("aria-hidden=\"true\""));
+            assert!(!icon.contains("style="));
+            assert!(
+                icons.iter().skip(i + 1).all(|other| other != icon),
+                "{}",
+                known[i]
+            );
+        }
+        assert!(!icons.contains(&module_icon("something-else")));
+        assert_eq!(module_icon("something-else"), module_icon("another"));
+    }
 
     #[test]
     fn tiles_render_states_actions_and_escaped_description() {

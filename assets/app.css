@@ -74,6 +74,10 @@ nav a[aria-current=page] { font-weight:600; }
 .module-tile:hover,.module-tile:focus-within { border-color:var(--accent); }
 .module-tile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .module-name { min-inline-size:0; font-weight:600; overflow-wrap:anywhere; }
+.module-title { display:flex; align-items:center; gap:8px; min-inline-size:0; }
+.module-icon { flex:none; inline-size:28px; block-size:28px; padding:4px; box-sizing:border-box; border-radius:8px; background:var(--accent-soft); color:var(--accent-text); }
+.module-tile.disabled .module-icon { background:var(--line); color:var(--muted); }
+h1.with-icon { display:flex; align-items:center; gap:10px; }
 .module-tile-heading form { flex:none; }
 .module-action { margin-block-start:auto; min-block-size:36px; }
 .module-description { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; overflow-wrap:anywhere; font-size:12px; }
