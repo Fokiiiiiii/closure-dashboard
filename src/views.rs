@@ -153,13 +153,11 @@ pub(crate) fn shell(
         l,
         headers,
         &format!(
-            "<div class=\"shell\"><aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">⌄</span></div><nav aria-label=\"{}\">{nav}</nav><div class=\"sidebar-footer\">{}</div></aside><div class=\"workspace\"><div class=\"breadcrumb\">{} / {}</div><main class=\"content{}\">{content}</main></div></div>",
+            "<div class=\"shell\"><aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span></div><nav aria-label=\"{}\">{nav}</nav><div class=\"sidebar-footer\">{}</div></aside><div class=\"workspace\"><main class=\"content{}\">{content}</main></div></div>",
             avatar(name),
             escape(name),
             l.text(keys::NAVIGATION),
             logout(l),
-            escape(name),
-            l.text(current),
             if narrow { " narrow" } else { "" }
         ),
     )
@@ -197,6 +195,8 @@ mod tests {
         assert!(pages[1].contains("&lt;script&gt;"));
         assert!(pages[2].contains("role=\"alert\""));
         assert!(pages[3].contains("action=\"/logout\""));
+        assert!(!pages[3].contains("breadcrumb"));
+        assert!(!pages[3].contains('⌄'));
     }
 
     #[test]
@@ -216,6 +216,18 @@ mod tests {
             assert!(css.contains(required), "{required}");
         }
         assert!(!css.contains(".segments"));
+        for unused in [
+            ".breadcrumb",
+            ".form-breadcrumb",
+            ".chart-note",
+            ".chart-empty",
+            ".pill.enabled",
+            ".pill.disabled",
+            ".settings-row small",
+            ".panel-heading span",
+        ] {
+            assert!(!css.contains(unused), "{unused}");
+        }
         for forbidden in [
             "http:",
             "https:",

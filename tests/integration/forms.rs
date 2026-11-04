@@ -93,7 +93,6 @@ async fn list_and_form_render_schema_and_directory() {
         "aria-current=\"page\"",
         "aria-checked=\"true\"",
         "/modules/welcome",
-        "設定項目はありません",
     ] {
         assert!(page.contains(expected), "{expected}");
     }
@@ -105,7 +104,6 @@ async fn list_and_form_render_schema_and_directory() {
         "type=\"radio\"",
         "<select",
         "&lt;script&gt;",
-        "aria-describedby",
         "name=\"etag\"",
     ] {
         assert!(page.contains(expected), "{expected}");
@@ -117,6 +115,11 @@ async fn list_and_form_render_schema_and_directory() {
     for expected in ["type=\"number\"", "min=\"1\"", "max=\"365\""] {
         assert!(page.contains(expected), "{expected}");
     }
+    assert!(!page.contains("Automatic moderation: rules"));
+    assert!(!page.contains("class=\"muted mono\""));
+    let page = html(response(&config, Method::GET, "/g/42/modules/welcome", "").await).await;
+    assert!(page.contains(">channel</label>"));
+    assert!(!page.contains("class=\"muted mono\""));
     let page = html(response(&config, Method::GET, "/g/42/modules/channels", "").await).await;
     assert!(page.contains("このモジュールに設定項目はありません"));
     state.lock().unwrap().directory_failure = true;
@@ -148,6 +151,8 @@ async fn pages_keep_logout_without_preference_controls_and_use_correct_width() {
             "{path}"
         );
         for forbidden in [
+            "breadcrumb",
+            "⌄",
             "name=\"lang\"",
             "name=\"theme\"",
             "aria-label=\"言語\"",
@@ -310,12 +315,18 @@ async fn server_settings_render_and_save() {
         "不明なロール 99",
         "&lt;script&gt;role&lt;/script&gt;",
         "&lt;script&gt;description&lt;/script&gt;",
-        "空で既定に戻ります",
         "aria-current=\"page\"",
     ] {
         assert!(page.contains(expected), "{expected}");
     }
-    for forbidden in ["<script>", "style=", "value=\"42\"", ">managed</label>"] {
+    for forbidden in [
+        "<script>",
+        "style=",
+        "value=\"42\"",
+        ">managed</label>",
+        "空で既定に戻ります",
+        "class=\"muted mono\"",
+    ] {
         assert!(!page.contains(forbidden), "{forbidden}");
     }
     let body = "etag=%221%22&f.language=ja&f.timezone=Asia%2FTokyo&f.prefix=%21&f.log_channel=11&roles_present=1&f.moderator_roles=13&f.moderator_roles=99&f.log_webhook=test";

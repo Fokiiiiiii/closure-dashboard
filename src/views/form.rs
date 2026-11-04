@@ -44,12 +44,12 @@ pub(super) fn control(
     let id = format!("field-{index}");
     let name = escape(&format!("f.{}", field.name));
     let described = if invalid {
-        format!("{id}-name {id}-error")
+        format!(" aria-describedby=\"{id}-error\"")
     } else {
-        format!("{id}-name")
+        String::new()
     };
     let attrs = format!(
-        "id=\"{id}\" name=\"{name}\" aria-describedby=\"{described}\"{}",
+        "id=\"{id}\" name=\"{name}\"{described}{}",
         if invalid {
             " aria-invalid=\"true\""
         } else {
@@ -124,7 +124,7 @@ pub(super) fn control(
                 };
                 let _ = write!(
                     result,
-                    "<input type=\"radio\" id=\"{radio_id}\" name=\"{name}\" value=\"{}\" aria-describedby=\"{described}\"{}{}><label for=\"{radio_id}\">{}</label>",
+                    "<input type=\"radio\" id=\"{radio_id}\" name=\"{name}\" value=\"{}\"{described}{}{}><label for=\"{radio_id}\">{}</label>",
                     escape(v),
                     if v == value { " checked" } else { "" },
                     if invalid {
@@ -177,19 +177,14 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         errors,
         saved,
     } = *data;
-    let description = schema["description"].as_str().unwrap_or("");
     let title = module;
     let enabled = effective["modules"][module]["enabled"]
         .as_bool()
         .unwrap_or(false);
     let mut body = format!(
-        "<div class=\"form-breadcrumb\"><a href=\"/g/{}/modules\">{}</a> / {}</div><header class=\"page-heading\"><h1>{}</h1>{}</header><p class=\"muted\">{}</p>",
-        escape(id),
-        l.text(keys::MODULES),
+        "<header class=\"page-heading\"><h1>{}</h1>{}</header>",
         escape(title),
-        escape(title),
-        toggle(l, id, module, enabled),
-        escape(description)
+        toggle(l, id, module, enabled)
     );
     if saved {
         let _ = write!(
@@ -232,9 +227,8 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         let field_errors = errors.get(&field.name);
         let _ = write!(
             body,
-            "<div class=\"settings-row\"><div><label for=\"field-{index}\">{}</label><small id=\"field-{index}-name\" class=\"muted mono\">{}</small>",
-            escape(&field.label),
-            escape(&field.name)
+            "<div class=\"settings-row\"><div><label for=\"field-{index}\">{}</label>",
+            escape(&field.label)
         );
         if let Some(messages) = field_errors {
             let _ = write!(

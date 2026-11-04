@@ -292,7 +292,18 @@ async fn statistics_render_and_validate_periods() {
         ] {
             assert!(html.contains(expected), "{expected}");
         }
-        for forbidden in ["<script>", "style=", "module-row", "Bot", "最後の変更"] {
+        for forbidden in [
+            "<script>",
+            "style=",
+            "module-row",
+            "Bot",
+            "最後の変更",
+            "日平均",
+            "新しい順",
+            "保存されます",
+            "chart-note",
+            "chart-empty",
+        ] {
             assert!(!html.contains(forbidden), "{forbidden}");
         }
         assert!(html.contains(&format!("?days={days}\" aria-current=\"true\"")));
@@ -359,10 +370,7 @@ async fn history_and_permissions_render() {
                 "&lt;script&gt;",
             ],
         ),
-        (
-            "/g/42/permissions",
-            vec!["ロールの割り当てはありません", "閲覧のみ"],
-        ),
+        ("/g/42/permissions", vec!["ロールの割り当てはありません"]),
     ] {
         let response = router(config.clone())
             .oneshot(request(&config, Method::GET, path, ""))
@@ -380,6 +388,8 @@ async fn history_and_permissions_render() {
         }
         assert!(!html.contains("<script>"));
         assert!(!html.contains("style="));
+        assert!(!html.contains("<span class=\"pill\">"));
+        assert!(!html.contains("assignment-cards"));
     }
     state.lock().unwrap().assigned = true;
     let response = router(config.clone())

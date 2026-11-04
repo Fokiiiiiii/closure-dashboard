@@ -16,24 +16,23 @@ pub mod keys {
     keys! {
         TITLE = "title", LOGIN = "login", DEV = "dev", LOGOUT = "logout",
         SERVERS = "servers", EMPTY = "empty", OVERVIEW = "overview", MODULES = "modules",
-        BOT = "bot", CONNECTED = "connected", ACTIVE = "active", LAST = "last",
-        RECENT = "recent", NONE = "none", ENABLED = "enabled", DISABLED = "disabled",
+        NONE = "none", ENABLED = "enabled", DISABLED = "disabled",
         DENIED = "denied", UNAVAILABLE = "unavailable", NOTFOUND = "notfound",
         INVALID = "invalid", CONFLICT = "conflict", OAUTH = "oauth",
         TIME_NOW = "time-now", TIME_YESTERDAY = "time-yesterday",
         TIME_MINUTE = "time-minute", TIME_HOUR = "time-hour", TIME_DAY = "time-day",
-        NAME = "name", STATUS = "status", NAVIGATION = "navigation",
+        NAME = "name", NAVIGATION = "navigation",
         HISTORY = "history", PERMISSIONS = "permissions", PERIOD = "period",
         DAYS = "days", SUMMARY = "summary", MEMBERS = "members", JOINS = "joins",
         LEAVES = "leaves", MESSAGES = "messages", MODERATION = "moderation",
-        AVERAGE = "average", CHARTS = "charts", JOIN_LEAVE = "join-leave",
-        NO_DATA = "no-data", STATS_FAILED = "stats-failed", RETENTION = "retention",
+        CHARTS = "charts", JOIN_LEAVE = "join-leave",
+        NO_DATA = "no-data", STATS_FAILED = "stats-failed",
         OTHER = "other", TABLE_VIEW = "table-view", DATE = "date", COUNT = "count",
-        LOG = "log", NEWEST = "newest", NUMBER = "number", KIND = "kind",
+        LOG = "log", NUMBER = "number", KIND = "kind",
         TARGET = "target", MODERATOR = "moderator", REASON = "reason", TIME = "time",
         REVOKED = "revoked", INITIAL = "initial", NO_CHANGE = "no-change",
         MORE = "more", CHANGE = "change", ACTOR = "actor", REVISION = "revision",
-        HISTORY_NOTE = "history-note", READ_ONLY = "read-only", ROLES = "roles",
+        ROLES = "roles",
         LEVEL = "level", VALUE = "value", SOURCE = "source", ROLE_EMPTY = "role-empty",
         USER_ASSIGNMENTS = "user-assignments", KEY_OVERRIDES = "key-overrides",
         WARN_KIND = "warn-kind", TIMEOUT_KIND = "timeout-kind", KICK_KIND = "kick-kind",
@@ -43,7 +42,7 @@ pub mod keys {
         RELOAD = "reload", CONFLICT_RELOAD = "conflict-reload",
         SERVER_SETTINGS = "server-settings", GENERAL = "general", TEXT_COMMANDS = "text-commands",
         LOG_SETTINGS = "log-settings", DISPLAY = "display", UNKNOWN_ROLE = "unknown-role",
-        EMOJI_DEFAULT = "emoji-default", SETTINGS_LANGUAGE = "settings-language",
+        SETTINGS_LANGUAGE = "settings-language",
         SETTINGS_TIMEZONE = "settings-timezone", SETTINGS_PRESET = "settings-preset",
         SETTINGS_PREFIX = "settings-prefix", SETTINGS_LOG_CHANNEL = "settings-log-channel",
         SETTINGS_LOG_WEBHOOK = "settings-log-webhook", SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
@@ -400,6 +399,34 @@ mod tests {
             (1_234_567, "1,234,567"),
         ] {
             assert_eq!(group_digits(n), expected);
+        }
+    }
+    #[test]
+    fn removed_display_keys_stay_removed() {
+        for key in [
+            "average",
+            "retention",
+            "newest",
+            "history-note",
+            "read-only",
+            "emoji-default",
+            "bot",
+            "connected",
+            "active",
+            "last",
+            "recent",
+            "status",
+        ] {
+            assert!(!keys::ALL.contains(&key), "{key}");
+            for definition in REGISTRY {
+                assert!(
+                    !definition
+                        .source
+                        .lines()
+                        .any(|line| line.starts_with(&format!("{key} ="))),
+                    "{key}"
+                );
+            }
         }
     }
     #[test]

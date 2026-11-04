@@ -59,11 +59,6 @@ pub(crate) fn overview(
     } else {
         String::new()
     };
-    let avg = l.with_text(
-        keys::AVERAGE,
-        "n",
-        &group_digits(message_total / u64::from(days)),
-    );
     let tiles = [
         (
             keys::MEMBERS,
@@ -74,7 +69,7 @@ pub(crate) fn overview(
         ),
         (keys::JOINS, group_digits(joins), String::new()),
         (keys::LEAVES, group_digits(leaves), String::new()),
-        (keys::MESSAGES, group_digits(message_total), avg),
+        (keys::MESSAGES, group_digits(message_total), String::new()),
         (
             keys::MODERATION,
             group_digits(cases["total"].as_u64().unwrap_or(0)),
@@ -89,8 +84,13 @@ pub(crate) fn overview(
     for (key, value, sub) in tiles {
         let _ = write!(
             body,
-            "<div class=\"card stat\"><div>{}</div><strong>{value}</strong><small>{sub}</small></div>",
-            l.text(key)
+            "<div class=\"card stat\"><div>{}</div><strong>{value}</strong>{}</div>",
+            l.text(key),
+            if sub.is_empty() {
+                String::new()
+            } else {
+                format!("<small>{sub}</small>")
+            }
         );
     }
     let _ = write!(
@@ -104,21 +104,13 @@ pub(crate) fn overview(
         &members["by_day"],
         &[("joins", keys::JOINS), ("leaves", keys::LEAVES)],
         false,
-        "",
     ));
-    let retention = messages["retention_days"].as_u64().unwrap_or(0);
-    let note = if u64::from(days) > retention {
-        l.number(keys::RETENTION, retention)
-    } else {
-        String::new()
-    };
     body.push_str(&charts::chart(
         l,
         keys::MESSAGES,
         &messages["by_day"],
         &[("count", keys::MESSAGES)],
         false,
-        &note,
     ));
     body.push_str(&charts::chart(
         l,
@@ -126,15 +118,13 @@ pub(crate) fn overview(
         &cases["by_day"],
         &charts::KINDS,
         true,
-        "",
     ));
     body.push_str("</section>");
     let recent = cases["recent"].as_array().map_or(&[][..], Vec::as_slice);
     let _ = write!(
         body,
-        "<section class=\"card panel\"><div class=\"panel-heading\"><h2>{}</h2><span>{}</span></div><div class=\"table-scroll\"><table><thead><tr>",
-        l.text(keys::LOG),
-        l.number(keys::NEWEST, recent.len() as u64)
+        "<section class=\"card panel\"><div class=\"panel-heading\"><h2>{}</h2></div><div class=\"table-scroll\"><table><thead><tr>",
+        l.text(keys::LOG)
     );
     for key in [
         keys::NUMBER,
@@ -217,5 +207,16 @@ mod tests {
             Some(&data),
         );
         assert!(!html.contains("+0"));
+        for forbidden in [
+            "chart-note",
+            "chart-empty",
+            "日平均",
+            "新しい順",
+            "保存されます",
+        ] {
+            assert!(!html.contains(forbidden), "{forbidden}");
+        }
+        assert!(html.contains("class=\"missing\""));
+        assert!(html.contains("<details>"));
     }
 }

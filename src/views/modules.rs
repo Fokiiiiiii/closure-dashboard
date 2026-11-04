@@ -45,10 +45,7 @@ pub(crate) fn modules_page(
         let description = schema["description"].as_str().unwrap_or("");
         let title = module.as_str();
         let action = if form::fields(&schema).is_empty() {
-            format!(
-                "<span class=\"muted module-action\">{}</span>",
-                l.text(keys::NO_SETTINGS)
-            )
+            String::new()
         } else {
             format!(
                 "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
@@ -59,16 +56,10 @@ pub(crate) fn modules_page(
         };
         let _ = write!(
             body,
-            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-name\">{}</span>{}</div><span class=\"pill {}\">{}</span><p class=\"muted module-description\">{}</p>{action}</li>",
+            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-name\">{}</span>{}</div><p class=\"muted module-description\">{}</p>{action}</li>",
             if enabled { "enabled" } else { "disabled" },
             escape(title),
             toggle(l, id, &module, enabled),
-            if enabled { "enabled" } else { "disabled" },
-            l.text(if enabled {
-                keys::ENABLED
-            } else {
-                keys::DISABLED
-            }),
             escape(description)
         );
     }
@@ -121,7 +112,7 @@ mod tests {
                 "aria-checked=\"false\"",
                 "beta: Disabled",
                 "module-description",
-                "This module has no settings",
+                "role=\"switch\"",
                 "No options",
             ],
         ]) {
@@ -130,6 +121,8 @@ mod tests {
             }
         }
         assert!(!tiles[1].contains("href=\"/g/42/modules/beta\""));
+        assert!(!page.contains("class=\"pill"));
+        assert!(!page.contains("This module has no settings"));
         assert!(!page.contains("<script>"));
     }
 }

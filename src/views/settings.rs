@@ -48,9 +48,9 @@ fn roles(
         return control(l, field, index, value, None, invalid);
     };
     let mut out = format!(
-        "<input type=\"hidden\" name=\"roles_present\" value=\"1\"><div class=\"role-list\" role=\"group\" aria-labelledby=\"field-{index}-label\" aria-describedby=\"field-{index}-name{}\">",
+        "<input type=\"hidden\" name=\"roles_present\" value=\"1\"><div class=\"role-list\" role=\"group\" aria-labelledby=\"field-{index}-label\"{}>",
         if invalid {
-            format!(" field-{index}-error")
+            format!(" aria-describedby=\"field-{index}-error\"")
         } else {
             String::new()
         }
@@ -171,11 +171,7 @@ pub(crate) fn settings_page(l: Locale<'_>, headers: &HeaderMap, data: &SettingsP
             } else {
                 format!("<label for=\"field-{index}\">{}</label>", l.text(label))
             };
-            let _ = write!(
-                body,
-                "<div class=\"settings-row\"><div>{heading}<small id=\"field-{index}-name\" class=\"muted mono\">{}</small>",
-                escape(name)
-            );
+            let _ = write!(body, "<div class=\"settings-row\"><div>{heading}");
             if !name.ends_with("_emoji")
                 && let Some(description) = field.schema["description"].as_str()
             {
@@ -183,18 +179,6 @@ pub(crate) fn settings_page(l: Locale<'_>, headers: &HeaderMap, data: &SettingsP
                     body,
                     "<p class=\"settings-help\">{}</p>",
                     escape(description)
-                );
-            }
-            if name.ends_with("_emoji") {
-                let default = if *name == "success_emoji" {
-                    "✅"
-                } else {
-                    "❌"
-                };
-                let _ = write!(
-                    body,
-                    "<p class=\"settings-help\">{}</p>",
-                    l.with_text(keys::EMOJI_DEFAULT, "value", default)
                 );
             }
             if let Some(messages) = errors {

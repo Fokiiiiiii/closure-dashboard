@@ -37,9 +37,8 @@ pub(crate) fn permissions(
         }
     }
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1><span class=\"pill\">{}</span></header><section class=\"card panel permission-panel\"><h2>{}</h2>",
+        "<header class=\"page-heading\"><h1>{}</h1></header><section class=\"card panel permission-panel\"><h2>{}</h2>",
         l.text(keys::PERMISSIONS),
-        l.text(keys::READ_ONLY),
         l.text(keys::ROLES)
     );
     if rows.is_empty() {
@@ -76,19 +75,57 @@ pub(crate) fn permissions(
         }
         body.push_str("</tbody></table></div>");
     }
-    body.push_str("</section><section class=\"assignment-cards\">");
+    body.push_str("</section>");
+    let mut cards = String::new();
     for (key, value) in [
         (keys::USER_ASSIGNMENTS, &effective["permissions"]["users"]),
         (keys::KEY_OVERRIDES, &effective["permissions"]["keys"]),
     ] {
         let count = value.as_object().map_or(0, serde_json::Map::len);
+        if count == 0 {
+            continue;
+        }
         let _ = write!(
-            body,
+            cards,
             "<div class=\"card stat\"><div>{}</div><strong>{}</strong></div>",
             l.text(key),
             l.number(keys::COUNT, count as u64)
         );
     }
-    body.push_str("</section>");
+    if !cards.is_empty() {
+        let _ = write!(
+            body,
+            "<section class=\"assignment-cards\">{cards}</section>"
+        );
+    }
     shell(l, headers, id, name, keys::PERMISSIONS, &body, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{Catalogs, REGISTRY};
+    use serde_json::json;
+
+    #[test]
+    fn assignment_cards_only_show_nonzero_counts() {
+        let catalogs = Catalogs::new(REGISTRY).unwrap();
+        for (users, keys, expected) in [(0, 0, 0), (1, 0, 1), (0, 1, 1), (1, 1, 2)] {
+            let data = json!({"permissions": {
+                "users": if users == 1 { json!({"a": 1}) } else { json!({}) },
+                "keys": if keys == 1 { json!({"b": 1}) } else { json!({}) }
+            }});
+            let html = permissions(
+                catalogs.locale("ja"),
+                &HeaderMap::new(),
+                "42",
+                "guild",
+                &data,
+                &json!({}),
+            );
+            assert_eq!(html.matches("<div class=\"card stat\">").count(), expected);
+            assert_eq!(html.contains("assignment-cards"), expected > 0);
+            assert!(!html.contains("class=\"pill\""));
+        }
+    }
 }

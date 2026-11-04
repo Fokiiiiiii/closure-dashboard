@@ -61,12 +61,15 @@ pub(super) fn chart(
     data: &Value,
     fields: &[(&str, &str)],
     stacked: bool,
-    note: &str,
 ) -> String {
     let days = data.as_array().map_or(&[][..], Vec::as_slice);
     let mut values = Vec::new();
     for day in days {
         let row: Vec<Option<u64>> = if stacked {
+            if day["kinds"].is_null() {
+                values.push(vec![None; fields.len()]);
+                continue;
+            }
             let mut totals = vec![Some(0_u64); 6];
             if let Some(kinds) = day["kinds"].as_object() {
                 for (kind, value) in kinds {
@@ -171,7 +174,7 @@ pub(super) fn chart(
                         base = y;
                     }
                 }
-            } else if title == keys::MESSAGES {
+            } else {
                 let _ = write!(
                     svg,
                     "<line class=\"missing\" x1=\"{bx:.2}\" x2=\"{:.2}\" y1=\"127\" y2=\"127\"/>",
@@ -209,7 +212,7 @@ pub(super) fn chart(
             .iter()
             .filter_map(|r| r[j])
             .fold(0, u64::saturating_add);
-        if total > 0 || !stacked {
+        if fields.len() > 1 && (total > 0 || !stacked) {
             let _ = write!(
                 legend,
                 "<span><i class=\"legend-dot series-{}\"></i>{} {total}</span>",
@@ -232,22 +235,14 @@ pub(super) fn chart(
         table.push_str("</tr>");
     }
     table.push_str("</tbody></table></div></details>");
-    let missing = values.iter().flatten().any(Option::is_none);
+    let legend = if legend.is_empty() {
+        String::new()
+    } else {
+        format!("<div class=\"legend\">{legend}</div>")
+    };
     format!(
-        "<figure class=\"card chart\"><figcaption>{}</figcaption>{}{}<div class=\"legend\">{legend}</div><p class=\"chart-note\">{}{}</p>{table}</figure>",
-        l.text(title),
-        if stacked && max == 0 {
-            format!("<p class=\"chart-empty\">{}</p>", l.text(keys::NO_DATA))
-        } else {
-            svg
-        },
-        "",
-        if missing {
-            l.text(keys::NO_DATA)
-        } else {
-            String::new()
-        },
-        note
+        "<figure class=\"card chart\"><figcaption>{}</figcaption>{svg}{legend}{table}</figure>",
+        l.text(title)
     )
 }
 
@@ -274,17 +269,24 @@ mod tests {
             &json!([{"date":"2026-11-01","count":null}]),
             &[("count", keys::MESSAGES)],
             false,
-            "",
         );
         assert!(message.contains("class=\"missing\""));
         assert!(message.contains("<details>"));
+        let missing_cases = chart(
+            l,
+            keys::MODERATION,
+            &json!([{"date":"2026-11-01","kinds":null}]),
+            &KINDS,
+            true,
+        );
+        assert!(missing_cases.contains("class=\"missing\""));
+        assert!(missing_cases.contains("<td>—</td>"));
         let first = chart(
             l,
             keys::MODERATION,
             &json!([{"date":"2026-11-01","kinds":{"warn":1,"zzz":9}}]),
             &KINDS,
             true,
-            "",
         );
         let second = chart(
             l,
@@ -292,7 +294,6 @@ mod tests {
             &json!([{"date":"2026-11-01","kinds":{"warn":9,"zzz":1}}]),
             &KINDS,
             true,
-            "",
         );
         for result in [first, second] {
             assert!(result.contains("class=\"series-1\""));

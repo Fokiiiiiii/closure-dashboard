@@ -48,9 +48,8 @@ pub(crate) fn history(
 ) -> String {
     let items = history.as_array().map_or(&[][..], Vec::as_slice);
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1><span class=\"pill\">{}</span></header><section class=\"card panel\"><div class=\"table-scroll\"><table><thead><tr>",
-        l.text(keys::HISTORY),
-        l.text(keys::HISTORY_NOTE)
+        "<header class=\"page-heading\"><h1>{}</h1></header><section class=\"card panel\"><div class=\"table-scroll\"><table><thead><tr>",
+        l.text(keys::HISTORY)
     );
     for key in [keys::REVISION, keys::CHANGE, keys::ACTOR, keys::TIME] {
         let _ = write!(body, "<th>{}</th>", l.text(key));
