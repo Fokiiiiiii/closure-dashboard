@@ -14,7 +14,7 @@ pub mod keys {
         };
     }
     keys! {
-        TITLE = "title", LOGIN = "login", DEV = "dev", LOGOUT = "logout",
+        TITLE = "title", LOGIN = "login", LOGOUT = "logout",
         SERVERS = "servers", EMPTY = "empty", OVERVIEW = "overview", MODULES = "modules",
         NONE = "none", ENABLED = "enabled", DISABLED = "disabled",
         DENIED = "denied", UNAVAILABLE = "unavailable", NOTFOUND = "notfound",

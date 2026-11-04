@@ -26,7 +26,7 @@ async fn language_negotiation_and_removed_routes() {
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
     let req = Request::builder()
-        .uri("/login")
+        .uri("/auth/callback")
         .header(header::COOKIE, "lang=ja; theme=dark")
         .header(header::ACCEPT_LANGUAGE, "en")
         .body(Body::empty())
@@ -41,7 +41,7 @@ async fn language_negotiation_and_removed_routes() {
     )
     .unwrap();
     assert!(body.contains("<html lang=\"en\" dir=\"ltr\" data-theme=\"auto\""));
-    assert!(body.contains("Sign in with Discord"));
+    assert!(body.contains("Discord authentication failed"));
     assert!(!body.contains("name=\"lang\""));
     assert!(!body.contains("name=\"theme\""));
 }
@@ -655,20 +655,13 @@ async fn oauth_exchanges_code_and_discards_token() {
 }
 
 #[tokio::test]
-async fn development_route_is_disabled_in_release() {
+async fn there_is_no_login_page_or_development_post_route() {
     let (config, _) = setup().await;
     let response = router(config.clone())
         .oneshot(request(&config, Method::POST, "/auth/dev", ""))
         .await
         .unwrap();
-    assert_eq!(
-        response.status(),
-        if cfg!(debug_assertions) {
-            StatusCode::SEE_OTHER
-        } else {
-            StatusCode::NOT_FOUND
-        }
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -694,7 +687,20 @@ async fn login_goes_straight_to_discord_unless_the_dev_login_is_on() {
             .unwrap()
     };
     let response = router(config.clone()).oneshot(anonymous()).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    if cfg!(debug_assertions) {
+        // A development build with a configured user signs in at once, with no page in between.
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()[header::LOCATION], "/");
+        assert!(
+            response
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|v| v.to_str().unwrap().starts_with("session=123."))
+        );
+    } else {
+        assert_eq!(response.headers()[header::LOCATION], "/auth/discord");
+    }
     let signed_in = request(&config, Method::GET, "/login", "");
     let response = router(config.clone()).oneshot(signed_in).await.unwrap();
     assert_eq!(response.status(), StatusCode::SEE_OTHER);

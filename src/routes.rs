@@ -49,7 +49,6 @@ pub fn router(config: Config) -> Router {
         .route("/login", get(login))
         .route("/auth/discord", get(discord))
         .route("/auth/callback", get(callback))
-        .route("/auth/dev", post(dev))
         .route("/logout", post(logout))
         .route("/g/{id}", get(guild))
         .route("/g/{id}/history", get(history_page))
@@ -241,11 +240,22 @@ async fn login(State(app): State<App>, headers: HeaderMap) -> Response {
     if user(&headers, &app).is_some() {
         return Redirect::to("/").into_response();
     }
-    // The page exists only for the development login; otherwise sign-in is Discord and nothing else.
-    if !(cfg!(debug_assertions) && app.config.dev_user.is_some()) {
-        return Redirect::to("/auth/discord").into_response();
+    // There is no login page: a development build with a configured user signs in at once,
+    // everything else goes to Discord.
+    if cfg!(debug_assertions)
+        && let Some(id) = &app.config.dev_user
+    {
+        return set_cookie(
+            Redirect::to("/").into_response(),
+            &cookie_value(
+                &app,
+                "session",
+                &session::sign(id, &app.config.session_secret.0, session::now()),
+                session::AGE,
+            ),
+        );
     }
-    Html(views::login(lang(&headers, &app), &headers, true)).into_response()
+    Redirect::to("/auth/discord").into_response()
 }
 async fn discord(State(app): State<App>, headers: HeaderMap) -> Response {
     let mut bytes = [0_u8; 32];
@@ -362,27 +372,6 @@ async fn callback(
             &session::sign(&id, &app.config.session_secret.0, session::now()),
             session::AGE,
         ),
-    )
-}
-async fn dev(State(app): State<App>, headers: HeaderMap) -> Response {
-    if cfg!(debug_assertions)
-        && let Some(id) = &app.config.dev_user
-    {
-        return set_cookie(
-            Redirect::to("/").into_response(),
-            &cookie_value(
-                &app,
-                "session",
-                &session::sign(id, &app.config.session_secret.0, session::now()),
-                session::AGE,
-            ),
-        );
-    }
-    error_page(
-        StatusCode::NOT_FOUND,
-        lang(&headers, &app),
-        keys::NOTFOUND,
-        &headers,
     )
 }
 async fn logout(State(app): State<App>) -> Response {

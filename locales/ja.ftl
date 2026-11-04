@@ -1,6 +1,5 @@
 title = ダッシュボード
 login = Discord でログイン
-dev = 開発用ログイン
 logout = ログアウト
 servers = サーバーを選択
 empty = 利用できるサーバーはありません

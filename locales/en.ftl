@@ -1,6 +1,5 @@
 title = Dashboard
 login = Sign in with Discord
-dev = Development login
 logout = Sign out
 servers = Choose a server
 empty = No servers available

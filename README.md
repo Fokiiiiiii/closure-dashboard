@@ -8,7 +8,7 @@ Rust 製の closure 管理画面です。環境変数を設定して起動しま
 cargo run --release
 ```
 
-ブラウザで接続し、Discord の identify 権限でログインします。開発ビルドでは `DASHBOARD_DEV_USER_ID` を指定すると開発用ログインを利用できます。本番ビルドでは無効です。
+ブラウザで接続し、Discord の identify 権限でログインします。開発ビルドでは `DASHBOARD_DEV_USER_ID` を指定すると、ログイン画面なしでその利用者として自動的にログインします。本番ビルドでは無効です。
 
 実 Bot に接続するには、closure の管理 API を起動して `CLOSURE_API_URL` にその URL、`CLOSURE_ADMIN_TOKEN` に Bot 側で設定した管理トークンを指定します。Discord Developer Portal にアプリを登録し、`DISCORD_CLIENT_ID`、`DISCORD_CLIENT_SECRET`、登録した callback URL と一致する `DISCORD_REDIRECT_URI` を設定してください。推測されない `SESSION_SECRET` を設定してダッシュボードを起動し、Discord でログインします。公開環境では HTTPS を使用してください。
 

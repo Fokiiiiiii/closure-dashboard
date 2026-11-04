@@ -37,22 +37,6 @@ pub(crate) fn card_page(l: Locale<'_>, headers: &HeaderMap, body: &str) -> Strin
     )
 }
 
-pub(crate) fn login(l: Locale<'_>, headers: &HeaderMap, dev: bool) -> String {
-    let mut body = format!(
-        "<div class=\"mark\" aria-hidden=\"true\">c</div><h1>{}</h1><a class=\"button primary large\" href=\"/auth/discord\">{}</a>",
-        l.text(keys::TITLE),
-        l.text(keys::LOGIN)
-    );
-    if dev {
-        let _ = write!(
-            body,
-            "<form method=\"post\" action=\"/auth/dev\"><button class=\"button secondary large\" type=\"submit\">{}</button></form>",
-            l.text(keys::DEV)
-        );
-    }
-    card_page(l, headers, &body)
-}
-
 pub(crate) fn error(l: Locale<'_>, headers: &HeaderMap, message: &str) -> String {
     card_page(
         l,
@@ -202,7 +186,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(axum::http::header::COOKIE, "theme=dark".parse().unwrap());
         let pages = [
-            login(l, &headers, true),
             servers(l, &headers, &[("42".into(), "<script>".into())]),
             error(l, &headers, "error"),
             shell(l, &headers, "42", "server", keys::MODULES, "content", false),
@@ -219,11 +202,11 @@ mod tests {
                 assert!(!html.contains(forbidden), "{forbidden}");
             }
         }
-        assert!(pages[1].contains("&lt;script&gt;"));
-        assert!(pages[2].contains("role=\"alert\""));
-        assert!(pages[3].contains("action=\"/logout\""));
-        assert!(!pages[3].contains("breadcrumb"));
-        assert!(!pages[3].contains('⌄'));
+        assert!(pages[0].contains("&lt;script&gt;"));
+        assert!(pages[1].contains("role=\"alert\""));
+        assert!(pages[2].contains("action=\"/logout\""));
+        assert!(!pages[2].contains("breadcrumb"));
+        assert!(!pages[2].contains('⌄'));
     }
 
     #[test]
