@@ -7,6 +7,85 @@ pub enum Kind {
     Integer,
     String,
     Enum(Vec<String>),
+    Roles,
+}
+
+pub const SETTINGS: &[&str] = &[
+    "language",
+    "timezone",
+    "preset",
+    "prefix",
+    "log_channel",
+    "log_webhook",
+    "moderator_roles",
+    "success_emoji",
+    "error_emoji",
+];
+
+fn first_branch(schema: &Value, root: &Value) -> Value {
+    let mut current = schema.clone();
+    for _ in 0..8 {
+        if let Some(reference) = current["$ref"].as_str() {
+            let Some(path) = reference.strip_prefix('#') else {
+                break;
+            };
+            let Some(next) = root.pointer(path) else {
+                break;
+            };
+            current = next.clone();
+        } else if let Some(branch) = current["anyOf"]
+            .as_array()
+            .and_then(|v| v.iter().find(|v| v["type"] != "null"))
+        {
+            let mut next = branch.clone();
+            if let (Some(inner), Some(outer)) = (next.as_object_mut(), current.as_object()) {
+                for (key, value) in outer {
+                    if key != "anyOf" && !inner.contains_key(key) {
+                        inner.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            current = next;
+        } else {
+            break;
+        }
+    }
+    current
+}
+
+#[must_use]
+pub fn settings(schema: &Value) -> Vec<Field> {
+    SETTINGS
+        .iter()
+        .filter_map(|name| {
+            let source = schema["properties"].get(*name)?;
+            let mut resolved = first_branch(source, schema);
+            resolved["x-ui"]["server_settings"] = json!(true);
+            if *name == "log_channel" {
+                resolved["x-ui"]["widget"] = json!("channel");
+            }
+            let kind = if *name == "moderator_roles" {
+                Kind::Roles
+            } else if let Some(values) = resolved["enum"].as_array() {
+                Kind::Enum(
+                    values
+                        .iter()
+                        .map(|v| v.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()?,
+                )
+            } else if resolved["type"] == "string" {
+                Kind::String
+            } else {
+                return None;
+            };
+            Some(Field {
+                name: (*name).to_owned(),
+                label: (*name).to_owned(),
+                kind,
+                schema: resolved,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +273,23 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
+        Kind::Roles => {
+            let values: Vec<_> = input
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .collect();
+            if values.is_empty() {
+                return Some(Value::Null);
+            }
+            if values.iter().any(|v| {
+                let digits = v.strip_prefix('+').unwrap_or(v);
+                digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit())
+            }) {
+                return None;
+            }
+            Some(json!(values))
+        }
         Kind::String | Kind::Enum(_) => {
             if let Kind::Enum(values) = &field.kind
                 && !values.iter().any(|v| v == input)
@@ -206,6 +302,17 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             {
                 return None;
             }
+            if field.schema["minLength"]
+                .as_u64()
+                .is_some_and(|min| (input.chars().count() as u64) < min)
+                || (field.name == "prefix" && input.chars().any(char::is_whitespace))
+                || (field.name == "log_channel" && {
+                    let digits = input.strip_prefix('+').unwrap_or(input);
+                    digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit())
+                })
+            {
+                return None;
+            }
             if field.schema["pattern"]
                 .as_str()
                 .is_some_and(|pattern| !pattern_matches(pattern, input))
@@ -215,6 +322,37 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             Some(json!(input))
         }
     }
+}
+
+#[must_use]
+pub fn settings_should_write(
+    value: &Value,
+    stored: Option<&Value>,
+    effective: Option<&Value>,
+) -> bool {
+    fn normalized(v: &Value) -> Value {
+        match v {
+            Value::Array(a) if a.is_empty() => Value::Null,
+            Value::Array(a) => {
+                let mut values: Vec<String> = a
+                    .iter()
+                    .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+                    .collect();
+                values.sort();
+                values.dedup();
+                json!(values)
+            }
+            Value::Number(n) => json!(n.to_string()),
+            Value::Object(o) if o.len() == 1 => o
+                .iter()
+                .next()
+                .filter(|(_, v)| v.is_null())
+                .map_or_else(|| v.clone(), |(k, _)| json!(k)),
+            _ => v.clone(),
+        }
+    }
+    let baseline = stored.filter(|v| !v.is_null()).or(effective);
+    normalized(baseline.unwrap_or(&Value::Null)) != normalized(value)
 }
 
 #[must_use]
@@ -263,6 +401,35 @@ pub fn update<S: std::hash::BuildHasher>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn settings_schema_and_roles() {
+        let schema = json!({"properties":{"language":{"anyOf":[{"type":"string","enum":["auto","en","ja"]},{"type":"string"},{"type":"null"}]},"preset":{"$ref":"#/$defs/Preset"},"moderator_roles":{"type":"array"},"log_channel":{"anyOf":[{"type":"string"},{"type":"integer"}]},"version":{"type":"string"}},"$defs":{"Preset":{"anyOf":[{"type":"string","enum":["small","medium","large"]},{"type":"object"}]}}});
+        let fields = settings(&schema);
+        assert_eq!(fields.len(), 4);
+        assert_eq!(
+            fields[0].kind,
+            Kind::Enum(vec!["auto".into(), "en".into(), "ja".into()])
+        );
+        let roles = fields.iter().find(|f| f.name == "moderator_roles").unwrap();
+        assert_eq!(parse(roles, "1,+2"), Some(json!(["1", "+2"])));
+        assert_eq!(parse(roles, "1,bad"), None);
+        assert_eq!(parse(roles, ""), Some(Value::Null));
+        assert!(!settings_should_write(
+            &json!(["2", "1"]),
+            Some(&json!([1, 2])),
+            None
+        ));
+        assert!(!settings_should_write(
+            &json!("123"),
+            Some(&json!(123)),
+            None
+        ));
+        assert!(!settings_should_write(
+            &json!("medium"),
+            Some(&json!({"medium":null})),
+            None
+        ));
+    }
     #[test]
     fn schema_and_values() {
         let module = json!({"properties":{"config":{"anyOf":[{"type":"null"},{"properties":{

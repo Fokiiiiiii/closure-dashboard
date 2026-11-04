@@ -5,16 +5,16 @@ use super::{
 };
 use crate::form;
 
-struct Data {
-    guilds: Value,
-    schema: Value,
-    stored: Value,
-    effective: Value,
-    directory: Option<Value>,
-    etag: String,
+pub(super) struct Data {
+    pub(super) guilds: Value,
+    pub(super) schema: Value,
+    pub(super) stored: Value,
+    pub(super) effective: Value,
+    pub(super) directory: Option<Value>,
+    pub(super) etag: String,
 }
 
-async fn load(app: &App, id: &str, language: &str) -> Result<Data, ApiError> {
+pub(super) async fn load(app: &App, id: &str, language: &str) -> Result<Data, ApiError> {
     let (guilds, schema, stored, effective, directory) = tokio::join!(
         app.api.guilds(),
         app.api.basic_schema(language),

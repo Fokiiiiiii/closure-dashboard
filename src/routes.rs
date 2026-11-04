@@ -23,6 +23,7 @@ use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
 mod modules;
+mod settings;
 
 #[derive(Clone)]
 struct App {
@@ -56,6 +57,7 @@ pub fn router(config: Config) -> Router {
         .route("/g/{id}/history", get(history_page))
         .route("/g/{id}/permissions", get(permissions_page))
         .route("/g/{id}/modules", get(modules::list))
+        .route("/g/{id}/settings", get(settings::edit).post(settings::save))
         .route(
             "/g/{id}/modules/{module}",
             get(modules::edit).post(modules::save),

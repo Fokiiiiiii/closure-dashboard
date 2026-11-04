@@ -33,7 +33,7 @@ fn option(output: &mut String, value: &str, label: &str, selected: bool) {
 }
 
 #[allow(clippy::too_many_lines)]
-fn control(
+pub(super) fn control(
     l: Locale<'_>,
     field: &Field,
     index: usize,
@@ -103,8 +103,19 @@ fn control(
             field.schema["maximum"],
             escape(value)
         ),
-        Kind::Enum(values) if (2..=3).contains(&values.len()) => {
+        Kind::Enum(values)
+            if !(field.name == "preset" && field.schema["x-ui"]["server_settings"] == true)
+                && (2..=3).contains(&values.len()) =>
+        {
             let mut result = String::from("<div class=\"form-segments\">");
+            if field.name == "language" && field.schema["x-ui"]["server_settings"] == true {
+                let _ = write!(
+                    result,
+                    "<input type=\"radio\" id=\"{id}-unset\" name=\"{name}\" value=\"\"{}><label for=\"{id}-unset\">{}</label>",
+                    if value.is_empty() { " checked" } else { "" },
+                    l.text(keys::UNSET)
+                );
+            }
             for (i, v) in values.iter().enumerate() {
                 let radio_id = if i == 0 {
                     id.clone()
@@ -136,7 +147,7 @@ fn control(
             result.push_str("</select>");
             result
         }
-        Kind::String => {
+        Kind::String | Kind::Roles => {
             let pattern = field.schema["pattern"]
                 .as_str()
                 .map_or_else(String::new, |v| format!(" pattern=\"{}\"", escape(v)));

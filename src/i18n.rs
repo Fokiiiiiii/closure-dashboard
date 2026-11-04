@@ -41,7 +41,14 @@ pub mod keys {
         BAN_KIND = "ban-kind", VCMUTE_KIND = "vcmute-kind",
         SETTINGS = "settings", NO_SETTINGS = "no-settings", SAVE = "save",
         DISCARD = "discard", SAVED = "saved", UNSET = "unset", FIELD_INVALID = "field-invalid",
-        RELOAD = "reload", CONFLICT_RELOAD = "conflict-reload"
+        RELOAD = "reload", CONFLICT_RELOAD = "conflict-reload",
+        SERVER_SETTINGS = "server-settings", GENERAL = "general", TEXT_COMMANDS = "text-commands",
+        LOG_SETTINGS = "log-settings", DISPLAY = "display", UNKNOWN_ROLE = "unknown-role",
+        EMOJI_DEFAULT = "emoji-default", SETTINGS_LANGUAGE = "settings-language",
+        SETTINGS_TIMEZONE = "settings-timezone", SETTINGS_PRESET = "settings-preset",
+        SETTINGS_PREFIX = "settings-prefix", SETTINGS_LOG_CHANNEL = "settings-log-channel",
+        SETTINGS_LOG_WEBHOOK = "settings-log-webhook", SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
+        SETTINGS_SUCCESS_EMOJI = "settings-success-emoji", SETTINGS_ERROR_EMOJI = "settings-error-emoji"
     }
 }
 

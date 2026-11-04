@@ -9,6 +9,8 @@ pub(super) fn bot_data(
     let fixture = |source: &str| serde_json::from_str::<serde_json::Value>(source).unwrap();
     let data = if path == "/v1/schema" {
         let mut schema = fixture(include_str!("../fixtures/schema-basic.json"));
+        schema["properties"]["timezone"]["anyOf"][0]["description"] =
+            json!("<script>description</script>");
         schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"]["properties"]["config"]
             ["anyOf"][0]["properties"]["choice"] =
             json!({"type":"string","enum":["one","<script>"]});
@@ -21,11 +23,22 @@ pub(super) fn bot_data(
     } else if path.ends_with("/config") && *method == Method::PUT {
         fake.form_body = Some(serde_json::from_slice(body).unwrap());
         if let Some(status) = fake.form_put_status {
-            return (status, [(header::ETAG, "\"1\"")], json!({"error":{"message":"bad","issues":[{"path":"modules.welcome.config.channel","message":"<script>bad</script>"}]}}).to_string());
+            let path = if fake
+                .form_body
+                .as_ref()
+                .is_some_and(|b| b.get("log_webhook").is_some())
+            {
+                "log_webhook"
+            } else {
+                "modules.welcome.config.channel"
+            };
+            return (status, [(header::ETAG, "\"1\"")], json!({"error":{"message":"bad","issues":[{"path":path,"message":"<script>bad</script>"}]}}).to_string());
         }
         json!({"revision":2})
     } else if path.ends_with("/config") {
-        fixture(include_str!("../fixtures/config-basic.json"))
+        let mut config = fixture(include_str!("../fixtures/config-basic.json"));
+        config["moderator_roles"] = json!([13, "99"]);
+        config
     } else if path.ends_with("/effective") {
         fixture(include_str!("../fixtures/api-eff.json"))
     } else if path.ends_with("/directory") {
@@ -36,7 +49,7 @@ pub(super) fn bot_data(
                 "{}".into(),
             );
         }
-        json!({"channels":[{"id":"11","name":"<script>","kind":"text"},{"id":"12","name":"voice","kind":"voice"}],"roles":[{"id":"13","name":"role","managed":false},{"id":"14","name":"managed","managed":true}]})
+        json!({"channels":[{"id":"11","name":"<script>","kind":"text"},{"id":"12","name":"voice","kind":"voice"}],"roles":[{"id":"42","name":"@everyone","managed":false},{"id":"13","name":"<script>role</script>","managed":false},{"id":"14","name":"managed","managed":true}]})
     } else if path.ends_with("/access/123") {
         json!({"allowed":true})
     } else if path == "/v1/guilds" {
@@ -243,4 +256,172 @@ async fn toggle_returns_only_to_same_origin() {
         assert_eq!(result.status(), StatusCode::SEE_OTHER);
         assert_eq!(result.headers()[header::LOCATION], expected);
     }
+}
+
+#[tokio::test]
+async fn server_settings_render_and_save() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let path = "/g/42/settings";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    for expected in [
+        "サーバー設定",
+        "name=\"f.language\"",
+        "type=\"radio\"",
+        "name=\"f.preset\"",
+        "value=\"small\"",
+        "name=\"f.log_channel\"",
+        "name=\"f.moderator_roles\"",
+        "不明なロール 99",
+        "&lt;script&gt;role&lt;/script&gt;",
+        "&lt;script&gt;description&lt;/script&gt;",
+        "空で既定に戻ります",
+        "aria-current=\"page\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    for forbidden in ["<script>", "style=", "value=\"42\"", ">managed</label>"] {
+        assert!(!page.contains(forbidden), "{forbidden}");
+    }
+    let body = "etag=%221%22&f.language=ja&f.timezone=Asia%2FTokyo&f.prefix=%21&f.log_channel=11&roles_present=1&f.moderator_roles=13&f.moderator_roles=99&f.log_webhook=test";
+    let result = response(&config, Method::POST, path, body).await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    assert_eq!(result.headers()[header::LOCATION], "/g/42/settings?saved=1");
+    {
+        let state = state.lock().unwrap();
+        let body = state.form_body.as_ref().unwrap();
+        assert_eq!(*body, json!({"log_channel":"11","log_webhook":"test"}));
+        assert!(
+            state
+                .queries
+                .iter()
+                .any(|q| q == "/v1/guilds/42/config?view=basic")
+        );
+        assert!(
+            state
+                .calls
+                .iter()
+                .any(|c| c.0.ends_with("/config") && c.2 == "\"1\"" && c.3 == "123")
+        );
+    }
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&roles_present=1&f.moderator_roles=13&f.moderator_roles=77"
+        )
+        .await
+        .status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        state.lock().unwrap().form_body.as_ref().unwrap()["moderator_roles"],
+        json!(["13", "77"])
+    );
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&roles_present=1&f.prefix="
+        )
+        .await
+        .status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        *state.lock().unwrap().form_body.as_ref().unwrap(),
+        json!({"moderator_roles":null,"prefix":null})
+    );
+    state.lock().unwrap().directory_failure = true;
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    assert!(page.contains("name=\"f.moderator_roles\""));
+    assert!(page.contains("value=\"13,99\""));
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&f.moderator_roles=13%2C77"
+        )
+        .await
+        .status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        state.lock().unwrap().form_body.as_ref().unwrap()["moderator_roles"],
+        json!(["13", "77"])
+    );
+}
+
+#[tokio::test]
+async fn server_settings_errors_and_security() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let path = "/g/42/settings";
+    let body = "etag=%221%22&f.log_webhook=test&f.timezone=%3Cscript%3E";
+    state.lock().unwrap().form_put_status = Some(StatusCode::UNPROCESSABLE_ENTITY);
+    let result = response(&config, Method::POST, path, body).await;
+    assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = html(result).await;
+    for expected in [
+        "aria-invalid=\"true\"",
+        "&lt;script&gt;bad&lt;/script&gt;",
+        "value=\"&lt;script&gt;\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    state.lock().unwrap().form_put_status = Some(StatusCode::FORBIDDEN);
+    let forbidden = response(&config, Method::POST, path, body).await;
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+    assert!(html(forbidden).await.contains("アクセス権がありません"));
+    state.lock().unwrap().form_put_status = Some(StatusCode::PRECONDITION_FAILED);
+    assert!(
+        html(response(&config, Method::POST, path, body).await)
+            .await
+            .contains("他の人が変更しました")
+    );
+    assert_eq!(
+        response(&config, Method::POST, path, "etag=%222%22")
+            .await
+            .status(),
+        StatusCode::PRECONDITION_FAILED
+    );
+    assert_eq!(
+        response(&config, Method::POST, path, "etag=%221%22&f.unknown=x")
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&f.moderator_roles=bad"
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let anonymous = Request::builder().uri(path).body(Body::empty()).unwrap();
+    assert_eq!(
+        router(config.clone())
+            .oneshot(anonymous)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    let no_origin = Request::builder()
+        .method(Method::POST)
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap();
+    assert_eq!(
+        router(config).oneshot(no_origin).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
 }

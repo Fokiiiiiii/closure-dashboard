@@ -135,12 +135,14 @@ mod history;
 mod modules;
 mod overview;
 mod permissions;
+mod settings;
 
 pub(crate) use form::{FormPage, form_page};
 pub(crate) use history::history;
 pub(crate) use modules::modules_page;
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
+pub(crate) use settings::{SettingsPage, settings_page};
 
 pub(crate) fn shell(
     l: Locale<'_>,
@@ -154,6 +156,16 @@ pub(crate) fn shell(
     for (path, key, icon) in [
         ("", keys::OVERVIEW, "M4 11l8-7 8 7v9H4z"),
         (
+            "/modules",
+            keys::MODULES,
+            "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
+        ),
+        (
+            "/settings",
+            keys::SERVER_SETTINGS,
+            "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 100 8 4 4 0 000-8z",
+        ),
+        (
             "/history",
             keys::HISTORY,
             "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
@@ -162,11 +174,6 @@ pub(crate) fn shell(
             "/permissions",
             keys::PERMISSIONS,
             "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
-        ),
-        (
-            "/modules",
-            keys::MODULES,
-            "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
         ),
     ] {
         let active = if key == current {
