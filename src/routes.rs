@@ -2,7 +2,8 @@ use crate::{
     closure_api::{Api, ApiError},
     config::Config,
     html::escape,
-    messages, session,
+    i18n::{Catalogs, Locale, REGISTRY, keys},
+    session,
 };
 use axum::{
     Router,
@@ -25,12 +26,20 @@ use subtle::ConstantTimeEq;
 struct App {
     config: Config,
     api: Api,
+    catalogs: std::sync::Arc<Catalogs>,
 }
 
+/// Creates the dashboard router.
+///
+/// # Panics
+/// Panics if the embedded locale registry is invalid.
 pub fn router(config: Config) -> Router {
     let app = App {
         api: Api::new(&config),
         config,
+        catalogs: std::sync::Arc::new(
+            Catalogs::new(REGISTRY).unwrap_or_else(|e| panic!("invalid embedded catalogs: {e}")),
+        ),
     };
     Router::new()
         .route("/", get(index))
@@ -40,6 +49,7 @@ pub fn router(config: Config) -> Router {
         .route("/auth/dev", post(dev))
         .route("/logout", post(logout))
         .route("/theme", post(theme))
+        .route("/lang", post(set_language))
         .route("/g/{id}", get(guild))
         .route("/g/{id}/modules/{module}/toggle", post(toggle))
         .route("/healthz", get(|| async { "ok" }))
@@ -57,34 +67,13 @@ pub fn router(config: Config) -> Router {
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }
-fn lang(headers: &HeaderMap) -> &'static str {
-    let header = headers
-        .get(header::ACCEPT_LANGUAGE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let mut best = (0.0_f32, "ja");
-    for part in header.split(',') {
-        let mut p = part.trim().split(';');
-        let tag = p.next().unwrap_or("").to_ascii_lowercase();
-        let q = p
-            .find_map(|x| {
-                x.trim()
-                    .strip_prefix("q=")
-                    .and_then(|v| v.parse::<f32>().ok())
-            })
-            .unwrap_or(1.0);
-        let l = if tag == "en" || tag.starts_with("en-") {
-            "en"
-        } else if tag == "ja" || tag.starts_with("ja-") {
-            "ja"
-        } else {
-            continue;
-        };
-        if q > best.0 {
-            best = (q, l);
-        }
-    }
-    best.1
+fn lang<'a>(headers: &HeaderMap, app: &'a App) -> Locale<'a> {
+    app.catalogs.negotiate(
+        cookie(headers, "lang"),
+        headers
+            .get(header::ACCEPT_LANGUAGE)
+            .and_then(|v| v.to_str().ok()),
+    )
 }
 fn cookie<'a>(headers: &'a HeaderMap, key: &str) -> Option<&'a str> {
     headers
@@ -141,19 +130,20 @@ fn csrf(headers: &HeaderMap, app: &App) -> bool {
 }
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
-    let language = lang(request.headers());
-    let public = matches!(path, "/login" | "/app.css" | "/healthz") || path.starts_with("/auth/");
+    let language = lang(request.headers(), &app);
+    let public =
+        matches!(path, "/login" | "/app.css" | "/healthz" | "/lang") || path.starts_with("/auth/");
     let mut response = if request.method() == Method::POST && !csrf(request.headers(), &app) {
-        error_page(StatusCode::FORBIDDEN, language, "denied")
+        error_page(StatusCode::FORBIDDEN, language, keys::DENIED)
     } else if !public && user(request.headers(), &app).is_none() {
         Redirect::to("/login").into_response()
     } else if let Some(id) = path.strip_prefix("/g/").and_then(|p| p.split('/').next()) {
         if !session::snowflake(id) {
-            error_page(StatusCode::BAD_REQUEST, language, "invalid")
+            error_page(StatusCode::BAD_REQUEST, language, keys::INVALID)
         } else if let Some(actor) = user(request.headers(), &app) {
             match app.api.access(id, &actor).await {
                 Ok((access, _)) if access["allowed"] == true => run(next, request).await,
-                Ok(_) => error_page(StatusCode::FORBIDDEN, language, "denied"),
+                Ok(_) => error_page(StatusCode::FORBIDDEN, language, keys::DENIED),
                 Err(e) => api_error(&e, language),
             }
         } else {
@@ -162,7 +152,24 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     } else {
         run(next, request).await
     };
+    if response.status().is_client_error()
+        && response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/plain"))
+    {
+        response = error_page(response.status(), language, keys::INVALID);
+    }
     let h = response.headers_mut();
+    h.insert(
+        header::CONTENT_LANGUAGE,
+        HeaderValue::from_str(language.tag()).unwrap_or_else(|_| HeaderValue::from_static("ja")),
+    );
+    h.insert(
+        header::VARY,
+        HeaderValue::from_static("Accept-Language, Cookie"),
+    );
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -180,37 +187,70 @@ async fn run(next: Next, request: Request) -> Response {
         .await
         .unwrap_or_else(|_| StatusCode::GATEWAY_TIMEOUT.into_response())
 }
-fn page(language: &str, headers: &HeaderMap, content: &str) -> Response {
+fn language_form(language: Locale<'_>) -> String {
+    let mut options = String::new();
+    for definition in language.catalogs().definitions() {
+        let selected = if definition.tag == language.tag() {
+            " selected"
+        } else {
+            ""
+        };
+        let _ = write!(
+            options,
+            "<option value=\"{}\"{selected}>{}</option>",
+            escape(definition.tag),
+            escape(definition.name)
+        );
+    }
+    format!(
+        "<form method=\"post\" action=\"/lang\"><label>{}<select name=\"lang\">{options}</select></label><button>{}</button></form>",
+        language.text(keys::LANGUAGE),
+        language.text(keys::APPLY)
+    )
+}
+fn page(language: Locale<'_>, headers: &HeaderMap, content: &str) -> Response {
     let theme = cookie(headers, "theme")
         .filter(|x| matches!(*x, "light" | "dark"))
         .unwrap_or("auto");
-    Html(format!("<!doctype html><html lang=\"{language}\" data-theme=\"{theme}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body>{content}</body></html>", messages::get(language,"title"))).into_response()
+    Html(format!("<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"{theme}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body><header>{}</header>{content}</body></html>", escape(language.tag()), escape(language.dir()), language.text(keys::TITLE), language_form(language))).into_response()
 }
-fn error_page(status: StatusCode, language: &str, key: &str) -> Response {
-    (status, Html(format!("<!doctype html><html lang=\"{language}\"><meta charset=\"utf-8\"><link rel=\"stylesheet\" href=\"/app.css\"><main><p role=\"alert\">{}</p><a href=\"/\">{}</a></main></html>", messages::get(language,key), messages::get(language,"servers")))).into_response()
+fn error_page(status: StatusCode, language: Locale<'_>, key: &str) -> Response {
+    (
+        status,
+        page(
+            language,
+            &HeaderMap::new(),
+            &format!(
+                "<main><p role=\"alert\">{}</p><a href=\"/\">{}</a></main>",
+                language.text(key),
+                language.text(keys::SERVERS)
+            ),
+        ),
+    )
+        .into_response()
 }
-fn api_error(error: &ApiError, language: &str) -> Response {
+fn api_error(error: &ApiError, language: Locale<'_>) -> Response {
     let key = match error.status {
-        StatusCode::FORBIDDEN => "denied",
-        StatusCode::NOT_FOUND => "notfound",
-        StatusCode::SERVICE_UNAVAILABLE => "unavailable",
-        StatusCode::PRECONDITION_FAILED => "conflict",
-        _ => "invalid",
+        StatusCode::FORBIDDEN => keys::DENIED,
+        StatusCode::NOT_FOUND => keys::NOTFOUND,
+        StatusCode::SERVICE_UNAVAILABLE => keys::UNAVAILABLE,
+        StatusCode::PRECONDITION_FAILED => keys::CONFLICT,
+        _ => keys::INVALID,
     };
     error_page(error.status, language, key)
 }
 async fn login(State(app): State<App>, headers: HeaderMap) -> Response {
-    let l = lang(&headers);
+    let l = lang(&headers, &app);
     let mut content = format!(
         "<main><h1>{}</h1><a href=\"/auth/discord\">{}</a>",
-        messages::get(l, "title"),
-        messages::get(l, "login")
+        l.text(keys::TITLE),
+        l.text(keys::LOGIN)
     );
     if cfg!(debug_assertions) && app.config.dev_user.is_some() {
         let _ = write!(
             content,
             "<form method=\"post\" action=\"/auth/dev\"><button>{}</button></form>",
-            messages::get(l, "dev")
+            l.text(keys::DEV)
         );
     }
     content.push_str("</main>");
@@ -222,7 +262,11 @@ async fn discord(State(app): State<App>, headers: HeaderMap) -> Response {
         .and_then(|mut f| f.read_exact(&mut bytes))
         .is_err()
     {
-        return error_page(StatusCode::INTERNAL_SERVER_ERROR, lang(&headers), "oauth");
+        return error_page(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            lang(&headers, &app),
+            keys::OAUTH,
+        );
     }
     let state = URL_SAFE_NO_PAD.encode(bytes);
     let query = serde_urlencoded::to_string([
@@ -248,12 +292,12 @@ async fn callback(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
-    let l = lang(&headers);
+    let l = lang(&headers, &app);
     let state = query.get("state").map_or("", String::as_str);
     let expected = cookie(&headers, "oauth_state").unwrap_or("");
     let failure = || {
         set_cookie(
-            error_page(StatusCode::BAD_REQUEST, l, "oauth"),
+            error_page(StatusCode::BAD_REQUEST, l, keys::OAUTH),
             &cookie_value(&app, "oauth_state", "", 0),
         )
     };
@@ -342,7 +386,7 @@ async fn dev(State(app): State<App>, headers: HeaderMap) -> Response {
             ),
         );
     }
-    error_page(StatusCode::NOT_FOUND, lang(&headers), "notfound")
+    error_page(StatusCode::NOT_FOUND, lang(&headers, &app), keys::NOTFOUND)
 }
 async fn logout(State(app): State<App>) -> Response {
     set_cookie(
@@ -359,7 +403,7 @@ async fn theme(
         .get("theme")
         .filter(|v| matches!(v.as_str(), "light" | "dark" | "auto"))
     else {
-        return error_page(StatusCode::BAD_REQUEST, lang(&headers), "invalid");
+        return error_page(StatusCode::BAD_REQUEST, lang(&headers, &app), keys::INVALID);
     };
     let dest = headers
         .get(header::REFERER)
@@ -373,8 +417,36 @@ async fn theme(
         &cookie_value(&app, "theme", value, 31_536_000),
     )
 }
+async fn set_language(
+    State(app): State<App>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<HashMap<String, String>>,
+) -> Response {
+    let Some(value) = form
+        .get("lang")
+        .filter(|v| app.catalogs.definitions().any(|d| d.tag == v.as_str()))
+    else {
+        return error_page(StatusCode::BAD_REQUEST, lang(&headers, &app), keys::INVALID);
+    };
+    let dest = headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<axum::http::Uri>().ok())
+        .filter(|u| {
+            u.scheme_str()
+                .zip(u.authority())
+                .is_some_and(|(s, a)| Some(format!("{s}://{a}")) == own_origin(&app))
+        })
+        .and_then(|u| u.path_and_query().map(|p| p.as_str().to_owned()))
+        .filter(|p| p.starts_with('/') && !p.starts_with("//") && !p.contains('\\'))
+        .unwrap_or_else(|| "/".into());
+    set_cookie(
+        Redirect::to(&dest).into_response(),
+        &cookie_value(&app, "lang", value, 31_536_000),
+    )
+}
 async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
-    let l = lang(&headers);
+    let l = lang(&headers, &app);
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
     };
@@ -399,18 +471,18 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
     if allowed.len() == 1 {
         return Redirect::to(&format!("/g/{}", allowed[0].0)).into_response();
     }
-    let mut content = format!("<main><h1>{}</h1><ul>", messages::get(l, "servers"));
+    let mut content = format!("<main><h1>{}</h1><ul>", l.text(keys::SERVERS));
     for (id, name) in &allowed {
         let _ = write!(content, "<li><a href=\"/g/{id}\">{}</a></li>", escape(name));
     }
     content.push_str("</ul>");
     if allowed.is_empty() {
-        content.push_str(messages::get(l, "empty"));
+        content.push_str(&l.text(keys::EMPTY));
     }
     let _ = write!(
         content,
         "<form method=\"post\" action=\"/logout\"><button>{}</button></form></main>",
-        messages::get(l, "logout")
+        l.text(keys::LOGOUT)
     );
     page(l, &headers, &content)
 }
@@ -426,10 +498,14 @@ fn module_names(schema: &Value) -> serde_json::Map<String, Value> {
         .cloned()
         .unwrap_or_default()
 }
-fn theme_options(headers: &HeaderMap, language: &str) -> String {
+fn theme_options(headers: &HeaderMap, language: Locale<'_>) -> String {
     let current_theme = cookie(headers, "theme").unwrap_or("auto");
     let mut options = String::new();
-    for value in ["auto", "light", "dark"] {
+    for (value, key) in [
+        ("auto", keys::AUTO),
+        ("light", keys::LIGHT),
+        ("dark", keys::DARK),
+    ] {
         let selected = if value == current_theme {
             " selected"
         } else {
@@ -438,18 +514,18 @@ fn theme_options(headers: &HeaderMap, language: &str) -> String {
         let _ = write!(
             options,
             "<option value=\"{value}\"{selected}>{}</option>",
-            messages::get(language, value)
+            language.text(key)
         );
     }
     options
 }
 async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
-    let l = lang(&headers);
+    let l = lang(&headers, &app);
     let (guilds, effective, history, schema) = tokio::join!(
         app.api.guilds(),
         app.api.effective(&id),
         app.api.history(&id),
-        app.api.schema(l)
+        app.api.schema(l.bot_language())
     );
     let (guilds, effective, history, schema) = match (guilds, effective, history, schema) {
         (Ok((guilds, _)), Ok((effective, _)), Ok((history, _)), Ok((schema, _))) => {
@@ -473,28 +549,25 @@ async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMa
     let last = history_items
         .first()
         .and_then(|v| v["created_at_unix"].as_i64())
-        .map_or_else(
-            || "—".into(),
-            |v| messages::relative_time(l, v, session::now()),
-        );
+        .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()));
     let options = theme_options(&headers, l);
     let mut content = format!(
         "<div class=\"shell\"><aside><a href=\"/\">{}</a><nav><a href=\"/g/{id}\">{}</a></nav><form method=\"post\" action=\"/logout\"><button>{}</button></form><form method=\"post\" action=\"/theme\"><label>{}<select name=\"theme\">{options}</select></label><button>{}</button></form></aside><div class=\"workspace\"><div class=\"breadcrumb\"><a href=\"/\">{}</a> / {} / {}</div><main><h1>{}</h1><section class=\"stats\"><div class=\"card\">{}<strong>{}</strong></div><div class=\"card\">{}<strong>{active} / {}</strong></div><div class=\"card\">{}<strong>{last}</strong></div></section><section class=\"card\"><h2>{}</h2><table><tbody>",
         escape(name),
-        messages::get(l, "overview"),
-        messages::get(l, "logout"),
-        messages::get(l, "theme"),
-        messages::get(l, "apply"),
-        messages::get(l, "servers"),
+        l.text(keys::OVERVIEW),
+        l.text(keys::LOGOUT),
+        l.text(keys::THEME),
+        l.text(keys::APPLY),
+        l.text(keys::SERVERS),
         escape(name),
-        messages::get(l, "overview"),
-        messages::get(l, "overview"),
-        messages::get(l, "bot"),
-        messages::get(l, "connected"),
-        messages::get(l, "active"),
+        l.text(keys::OVERVIEW),
+        l.text(keys::OVERVIEW),
+        l.text(keys::BOT),
+        l.text(keys::CONNECTED),
+        l.text(keys::ACTIVE),
         modules.len(),
-        messages::get(l, "last"),
-        messages::get(l, "modules")
+        l.text(keys::LAST),
+        l.text(keys::MODULES)
     );
     for (module, def) in modules {
         if !valid_module(&module) {
@@ -506,7 +579,11 @@ async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMa
             content,
             "<tr><td>{}</td><td><span class=\"badge\">{}</span></td><td><form method=\"post\" action=\"/g/{id}/modules/{}/toggle\"><input type=\"hidden\" name=\"enabled\" value=\"{}\"><button role=\"switch\" aria-checked=\"{enabled}\" aria-label=\"{}\">◉</button></form></td></tr>",
             escape(title),
-            messages::get(l, if enabled { "enabled" } else { "disabled" }),
+            l.text(if enabled {
+                keys::ENABLED
+            } else {
+                keys::DISABLED
+            }),
             escape(&module),
             !enabled,
             escape(title)
@@ -515,20 +592,19 @@ async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMa
     let _ = write!(
         content,
         "</tbody></table></section><section class=\"card\"><h2>{}</h2><ul>",
-        messages::get(l, "recent")
+        l.text(keys::RECENT)
     );
     if history_items.is_empty() {
-        content.push_str(messages::get(l, "none"));
+        content.push_str(&l.text(keys::NONE));
     }
     for item in history_items.iter().take(4) {
         let _ = write!(
             content,
             "<li>{} · {}</li>",
             escape(item["actor"].as_str().unwrap_or("—")),
-            item["created_at_unix"].as_i64().map_or_else(
-                || "—".into(),
-                |v| messages::relative_time(l, v, session::now())
-            )
+            item["created_at_unix"]
+                .as_i64()
+                .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()))
         );
     }
     content.push_str("</ul></section></main></div></div>");
@@ -545,7 +621,7 @@ async fn toggle(
     headers: HeaderMap,
     axum::Form(form): axum::Form<HashMap<String, String>>,
 ) -> Response {
-    let l = lang(&headers);
+    let l = lang(&headers, &app);
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
     };
@@ -554,17 +630,17 @@ async fn toggle(
         "false" => Some(false),
         _ => None,
     }) else {
-        return error_page(StatusCode::BAD_REQUEST, l, "invalid");
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
     };
     if !valid_module(&module) {
-        return error_page(StatusCode::BAD_REQUEST, l, "invalid");
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
     }
-    let schema = match app.api.schema(l).await {
+    let schema = match app.api.schema(l.bot_language()).await {
         Ok((v, _)) => v,
         Err(e) => return api_error(&e, l),
     };
     if !module_names(&schema).contains_key(&module) {
-        return error_page(StatusCode::BAD_REQUEST, l, "invalid");
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
     }
     for attempt in 0..2 {
         let (mut config, etag) = match app.api.config(&id).await {
@@ -572,22 +648,22 @@ async fn toggle(
             Err(e) => return api_error(&e, l),
         };
         let Some(etag) = etag else {
-            return error_page(StatusCode::BAD_GATEWAY, l, "invalid");
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
         };
         if !config.is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, "invalid");
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
         }
         if config["modules"].is_null() {
             config["modules"] = json!({});
         }
         if !config["modules"].is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, "invalid");
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
         }
         if config["modules"][&module].is_null() {
             config["modules"][&module] = json!({});
         }
         if !config["modules"][&module].is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, "invalid");
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
         }
         config["modules"][&module]["enabled"] = json!(enabled);
         match app.api.put_config(&id, config, &etag, &actor).await {
@@ -599,10 +675,44 @@ async fn toggle(
                     .map(|s| escape(&s))
                     .collect::<Vec<_>>()
                     .join(": ");
-                return (e.status, Html(format!("<p role=\"alert\">{text}</p>"))).into_response();
+                return (
+                    e.status,
+                    page(
+                        l,
+                        &headers,
+                        &format!("<main><p role=\"alert\">{text}</p></main>"),
+                    ),
+                )
+                    .into_response();
             }
             Err(e) => return api_error(&e, l),
         }
     }
-    error_page(StatusCode::PRECONDITION_FAILED, l, "conflict")
+    error_page(StatusCode::PRECONDITION_FAILED, l, keys::CONFLICT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Definition;
+
+    #[tokio::test]
+    async fn rtl_page_uses_locale_direction() {
+        let catalogs = Catalogs::new(&[
+            REGISTRY[0],
+            Definition {
+                tag: "ar",
+                name: "العربية",
+                dir: "rtl",
+                source: "title = عربي",
+            },
+        ])
+        .unwrap();
+        let response = page(catalogs.locale("ar"), &HeaderMap::new(), "");
+        let body = axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("<html lang=\"ar\" dir=\"rtl\""));
+    }
 }

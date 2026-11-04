@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "form", "query"] }
 base64 = "0.22"
+fluent-bundle = "0.16"
 hmac = "0.13"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
@@ -25,6 +26,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net
 tower-http = { version = "0.7", default-features = false, features = ["limit", "timeout"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+unic-langid = "0.9"
 
 [profile.release]
 opt-level = "s"

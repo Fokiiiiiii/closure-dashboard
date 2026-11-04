@@ -4,7 +4,7 @@
 pub mod closure_api;
 pub mod config;
 pub mod html;
-pub mod messages;
+pub mod i18n;
 pub mod routes;
 pub mod session;
 
