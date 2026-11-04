@@ -1,56 +1,13 @@
-# sv
+# closure dashboard
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@1.2.0 create --template minimal --types ts --install npm closure-dashboard
-```
-
-## Adding features
-
-Add features to your project with `sv add`:
-
-```sh
-npx sv add
-```
-
-For example, to add Tailwind CSS:
-
-```sh
-npx sv add tailwindcss
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+環境変数は `.env.example` を参照し、実行環境で設定してください。Discord Developer Portal の OAuth2 redirect に `DISCORD_REDIRECT_URI` を登録します。Bot 側で HTTP API を有効にし、管理トークンを dashboard の `CLOSURE_ADMIN_TOKEN` と一致させてください。
 
 ```sh
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
+npm run check
+npm test
 npm run build
+node build
 ```
 
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+`DASHBOARD_DEV_USER_ID` は開発サーバー専用です。本番ビルドでは無視されます。公開運用では HTTPS を使用してください。adapter-node は標準で HTTPS として URL を判定します。信頼できるリバースプロキシを使う場合は、プロキシが接続元のヘッダーを上書きする設定にしたうえで、必要に応じて `PROTOCOL_HEADER` など adapter-node のヘッダー設定を指定してください。
