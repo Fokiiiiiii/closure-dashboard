@@ -115,6 +115,10 @@ struct Fake {
     stats_status: Option<StatusCode>,
     assigned: bool,
     queries: Vec<String>,
+    forms: bool,
+    directory_failure: bool,
+    form_put_status: Option<StatusCode>,
+    form_body: Option<serde_json::Value>,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -144,6 +148,9 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     fake.calls.push((path.clone(), auth, etag, actor));
     if let Some(status) = fake.status {
         return (status, [(header::ETAG, "\"1\"")], json!({"error":{"code":"secret-token", "message":"secret-token", "issues":[{"path":"x", "code":"x", "message":"secret-token"}]}}).to_string());
+    }
+    if fake.forms {
+        return forms::bot_data(&mut fake, &path, &method, &body);
     }
     if path.ends_with("/stats")
         && let Some(status) = fake.stats_status
@@ -212,6 +219,9 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     };
     (StatusCode::OK, [(header::ETAG, "\"1\"")], value.to_string())
 }
+
+#[path = "integration/forms.rs"]
+mod forms;
 async fn setup() -> (Config, Arc<Mutex<Fake>>) {
     let state = Arc::new(Mutex::new(Fake::default()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -279,6 +289,25 @@ api_get_test!(api_stats, stats("42", 7), "/v1/guilds/42/stats");
 api_get_test!(api_directory, directory("42"), "/v1/guilds/42/directory");
 
 #[tokio::test]
+async fn basic_api_uses_view_and_conditional_actor_headers() {
+    let (config, state) = setup().await;
+    let api = Api::new(&config);
+    api.basic_schema("ja").await.unwrap();
+    api.basic_config("42").await.unwrap();
+    let error = api
+        .put_basic_config("42", json!({}), "\"1\"", "123")
+        .await
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::PRECONDITION_FAILED);
+    let fake = state.lock().unwrap();
+    assert_eq!(fake.queries[0], "/v1/schema?view=basic&locale=ja");
+    assert_eq!(fake.queries[1], "/v1/guilds/42/config?view=basic");
+    assert_eq!(fake.queries[2], "/v1/guilds/42/config?view=basic");
+    assert_eq!(fake.calls[2].2, "\"1\"");
+    assert_eq!(fake.calls[2].3, "123");
+}
+
+#[tokio::test]
 async fn statistics_render_and_validate_periods() {
     let (config, state) = setup().await;
     for (query, days) in [
@@ -317,7 +346,7 @@ async fn statistics_render_and_validate_periods() {
         ] {
             assert!(html.contains(expected), "{expected}");
         }
-        for forbidden in ["<script>", "style=", "モジュール", "Bot", "最後の変更"] {
+        for forbidden in ["<script>", "style=", "module-row", "Bot", "最後の変更"] {
             assert!(!html.contains(forbidden), "{forbidden}");
         }
         assert!(html.contains(&format!("?days={days}\" aria-current=\"true\"")));

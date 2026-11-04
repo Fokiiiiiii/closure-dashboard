@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod modules;
+
 #[derive(Clone)]
 struct App {
     config: Config,
@@ -53,6 +55,11 @@ pub fn router(config: Config) -> Router {
         .route("/g/{id}", get(guild))
         .route("/g/{id}/history", get(history_page))
         .route("/g/{id}/permissions", get(permissions_page))
+        .route("/g/{id}/modules", get(modules::list))
+        .route(
+            "/g/{id}/modules/{module}",
+            get(modules::edit).post(modules::save),
+        )
         .route("/g/{id}/modules/{module}/toggle", post(toggle))
         .route("/healthz", get(|| async { "ok" }))
         .route(
@@ -617,7 +624,9 @@ async fn toggle(
         }
         config["modules"][&module]["enabled"] = json!(enabled);
         match app.api.put_config(&id, config, &etag, &actor).await {
-            Ok(_) => return Redirect::to(&format!("/g/{id}")).into_response(),
+            Ok(_) => {
+                return Redirect::to(&modules::return_path(&app, &headers, &id)).into_response();
+            }
             Err(e) if e.status == StatusCode::PRECONDITION_FAILED && attempt == 0 => {}
             Err(e) if e.status == StatusCode::UNPROCESSABLE_ENTITY => {
                 let text = std::iter::once(e.message)

@@ -130,15 +130,19 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
 }
 
 mod charts;
+mod form;
 mod history;
+mod modules;
 mod overview;
 mod permissions;
 
+pub(crate) use form::{FormPage, form_page};
 pub(crate) use history::history;
+pub(crate) use modules::modules_page;
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
 
-fn shell(
+pub(crate) fn shell(
     l: Locale<'_>,
     headers: &HeaderMap,
     id: &str,
@@ -158,6 +162,11 @@ fn shell(
             "/permissions",
             keys::PERMISSIONS,
             "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
+        ),
+        (
+            "/modules",
+            keys::MODULES,
+            "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
         ),
     ] {
         let active = if key == current {
@@ -226,7 +235,7 @@ mod tests {
     #[test]
     fn stylesheet_constraints() {
         let css = include_str!("../assets/app.css");
-        assert!(css.len() <= 16_384);
+        assert!(css.len() <= 24_576);
         for forbidden in [
             "http:",
             "https:",

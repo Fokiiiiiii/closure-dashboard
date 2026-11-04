@@ -1,0 +1,1 @@
+{"language":"ja","timezone":"Asia/Tokyo","prefix":"!","modules":{"automod":{"enabled":true},"channels":{"enabled":false},"logs":{"enabled":true,"config":{"channel":"123456789012345678"}},"moderation":{"enabled":true}}}

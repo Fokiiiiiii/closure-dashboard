@@ -213,6 +213,18 @@ impl Api {
     }
     /// # Errors
     /// Returns a sanitized API or transport error.
+    pub async fn basic_schema(&self, locale: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/schema?view=basic&locale={locale}"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
     pub async fn effective(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
         self.request(
             Method::GET,
@@ -268,6 +280,36 @@ impl Api {
             None,
             None,
             None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn basic_config(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/config?view=basic"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn put_basic_config(
+        &self,
+        guild: &str,
+        value: Value,
+        etag: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::PUT,
+            &format!("/v1/guilds/{guild}/config?view=basic"),
+            Some(value),
+            Some(etag),
+            Some(actor),
         )
         .await
     }
