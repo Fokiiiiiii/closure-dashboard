@@ -7,5 +7,6 @@ pub mod html;
 pub mod i18n;
 pub mod routes;
 pub mod session;
+mod views;
 
 pub use routes::router;

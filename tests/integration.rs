@@ -97,7 +97,7 @@ async fn language_selection_and_rendering() {
     .unwrap();
     assert!(body.contains("<html lang=\"en\" dir=\"ltr\""));
     assert!(body.contains("Sign in with Discord"));
-    assert!(body.contains("<select name=\"lang\">"));
+    assert!(body.contains("name=\"lang\" value=\"en\" aria-pressed=\"true\""));
 }
 
 #[derive(Default)]
@@ -787,4 +787,50 @@ async fn theme_cookie_changes_rendered_theme() {
         .unwrap()
         .contains("data-theme=\"dark\"")
     );
+}
+
+#[tokio::test]
+async fn error_and_public_theme_preserve_cookie() {
+    let (config, _) = setup().await;
+    let response = router(config.clone())
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/theme")
+                .header(header::ORIGIN, "http://localhost")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("theme=dark"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .starts_with("theme=dark")
+    );
+    let response = router(config)
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/lang")
+                .header(header::COOKIE, "theme=dark")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("data-theme=\"dark\""));
+    assert!(body.contains("role=\"alert\""));
+    assert!(!body.contains("style="));
 }

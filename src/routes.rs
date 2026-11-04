@@ -3,7 +3,7 @@ use crate::{
     config::Config,
     html::escape,
     i18n::{Catalogs, Locale, REGISTRY, keys},
-    session,
+    session, views,
 };
 use axum::{
     Router,
@@ -19,7 +19,7 @@ use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use serde_json::{Value, json};
-use std::{collections::HashMap, fmt::Write, io::Read, time::Duration};
+use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
 #[derive(Clone)]
@@ -75,7 +75,7 @@ fn lang<'a>(headers: &HeaderMap, app: &'a App) -> Locale<'a> {
             .and_then(|v| v.to_str().ok()),
     )
 }
-fn cookie<'a>(headers: &'a HeaderMap, key: &str) -> Option<&'a str> {
+pub(crate) fn cookie<'a>(headers: &'a HeaderMap, key: &str) -> Option<&'a str> {
     headers
         .get(header::COOKIE)?
         .to_str()
@@ -129,22 +129,40 @@ fn csrf(headers: &HeaderMap, app: &App) -> bool {
         })
 }
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
+    let request_headers = request.headers().clone();
     let path = request.uri().path();
     let language = lang(request.headers(), &app);
-    let public =
-        matches!(path, "/login" | "/app.css" | "/healthz" | "/lang") || path.starts_with("/auth/");
+    let public = matches!(
+        path,
+        "/login" | "/app.css" | "/healthz" | "/lang" | "/theme"
+    ) || path.starts_with("/auth/");
     let mut response = if request.method() == Method::POST && !csrf(request.headers(), &app) {
-        error_page(StatusCode::FORBIDDEN, language, keys::DENIED)
+        error_page(
+            StatusCode::FORBIDDEN,
+            language,
+            keys::DENIED,
+            &request_headers,
+        )
     } else if !public && user(request.headers(), &app).is_none() {
         Redirect::to("/login").into_response()
     } else if let Some(id) = path.strip_prefix("/g/").and_then(|p| p.split('/').next()) {
         if !session::snowflake(id) {
-            error_page(StatusCode::BAD_REQUEST, language, keys::INVALID)
+            error_page(
+                StatusCode::BAD_REQUEST,
+                language,
+                keys::INVALID,
+                &request_headers,
+            )
         } else if let Some(actor) = user(request.headers(), &app) {
             match app.api.access(id, &actor).await {
                 Ok((access, _)) if access["allowed"] == true => run(next, request).await,
-                Ok(_) => error_page(StatusCode::FORBIDDEN, language, keys::DENIED),
-                Err(e) => api_error(&e, language),
+                Ok(_) => error_page(
+                    StatusCode::FORBIDDEN,
+                    language,
+                    keys::DENIED,
+                    &request_headers,
+                ),
+                Err(e) => api_error(&e, language, &request_headers),
             }
         } else {
             Redirect::to("/login").into_response()
@@ -159,7 +177,7 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.starts_with("text/plain"))
     {
-        response = error_page(response.status(), language, keys::INVALID);
+        response = error_page(response.status(), language, keys::INVALID, &request_headers);
     }
     let h = response.headers_mut();
     h.insert(
@@ -187,49 +205,23 @@ async fn run(next: Next, request: Request) -> Response {
         .await
         .unwrap_or_else(|_| StatusCode::GATEWAY_TIMEOUT.into_response())
 }
-fn language_form(language: Locale<'_>) -> String {
-    let mut options = String::new();
-    for definition in language.catalogs().definitions() {
-        let selected = if definition.tag == language.tag() {
-            " selected"
-        } else {
-            ""
-        };
-        let _ = write!(
-            options,
-            "<option value=\"{}\"{selected}>{}</option>",
-            escape(definition.tag),
-            escape(definition.name)
-        );
-    }
-    format!(
-        "<form method=\"post\" action=\"/lang\"><label>{}<select name=\"lang\">{options}</select></label><button>{}</button></form>",
-        language.text(keys::LANGUAGE),
-        language.text(keys::APPLY)
-    )
-}
+#[cfg(test)]
 fn page(language: Locale<'_>, headers: &HeaderMap, content: &str) -> Response {
-    let theme = cookie(headers, "theme")
-        .filter(|x| matches!(*x, "light" | "dark"))
-        .unwrap_or("auto");
-    Html(format!("<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"{theme}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body><header>{}</header>{content}</body></html>", escape(language.tag()), escape(language.dir()), language.text(keys::TITLE), language_form(language))).into_response()
+    Html(views::page(language, headers, content)).into_response()
 }
-fn error_page(status: StatusCode, language: Locale<'_>, key: &str) -> Response {
+fn error_page(
+    status: StatusCode,
+    language: Locale<'_>,
+    key: &str,
+    headers: &HeaderMap,
+) -> Response {
     (
         status,
-        page(
-            language,
-            &HeaderMap::new(),
-            &format!(
-                "<main><p role=\"alert\">{}</p><a href=\"/\">{}</a></main>",
-                language.text(key),
-                language.text(keys::SERVERS)
-            ),
-        ),
+        Html(views::error(language, headers, &language.text(key))),
     )
         .into_response()
 }
-fn api_error(error: &ApiError, language: Locale<'_>) -> Response {
+fn api_error(error: &ApiError, language: Locale<'_>, headers: &HeaderMap) -> Response {
     let key = match error.status {
         StatusCode::FORBIDDEN => keys::DENIED,
         StatusCode::NOT_FOUND => keys::NOTFOUND,
@@ -237,24 +229,16 @@ fn api_error(error: &ApiError, language: Locale<'_>) -> Response {
         StatusCode::PRECONDITION_FAILED => keys::CONFLICT,
         _ => keys::INVALID,
     };
-    error_page(error.status, language, key)
+    error_page(error.status, language, key, headers)
 }
 async fn login(State(app): State<App>, headers: HeaderMap) -> Response {
     let l = lang(&headers, &app);
-    let mut content = format!(
-        "<main><h1>{}</h1><a href=\"/auth/discord\">{}</a>",
-        l.text(keys::TITLE),
-        l.text(keys::LOGIN)
-    );
-    if cfg!(debug_assertions) && app.config.dev_user.is_some() {
-        let _ = write!(
-            content,
-            "<form method=\"post\" action=\"/auth/dev\"><button>{}</button></form>",
-            l.text(keys::DEV)
-        );
-    }
-    content.push_str("</main>");
-    page(l, &headers, &content)
+    Html(views::login(
+        l,
+        &headers,
+        cfg!(debug_assertions) && app.config.dev_user.is_some(),
+    ))
+    .into_response()
 }
 async fn discord(State(app): State<App>, headers: HeaderMap) -> Response {
     let mut bytes = [0_u8; 32];
@@ -266,6 +250,7 @@ async fn discord(State(app): State<App>, headers: HeaderMap) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR,
             lang(&headers, &app),
             keys::OAUTH,
+            &headers,
         );
     }
     let state = URL_SAFE_NO_PAD.encode(bytes);
@@ -297,7 +282,7 @@ async fn callback(
     let expected = cookie(&headers, "oauth_state").unwrap_or("");
     let failure = || {
         set_cookie(
-            error_page(StatusCode::BAD_REQUEST, l, keys::OAUTH),
+            error_page(StatusCode::BAD_REQUEST, l, keys::OAUTH, &headers),
             &cookie_value(&app, "oauth_state", "", 0),
         )
     };
@@ -386,7 +371,12 @@ async fn dev(State(app): State<App>, headers: HeaderMap) -> Response {
             ),
         );
     }
-    error_page(StatusCode::NOT_FOUND, lang(&headers, &app), keys::NOTFOUND)
+    error_page(
+        StatusCode::NOT_FOUND,
+        lang(&headers, &app),
+        keys::NOTFOUND,
+        &headers,
+    )
 }
 async fn logout(State(app): State<App>) -> Response {
     set_cookie(
@@ -403,7 +393,12 @@ async fn theme(
         .get("theme")
         .filter(|v| matches!(v.as_str(), "light" | "dark" | "auto"))
     else {
-        return error_page(StatusCode::BAD_REQUEST, lang(&headers, &app), keys::INVALID);
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            lang(&headers, &app),
+            keys::INVALID,
+            &headers,
+        );
     };
     let dest = headers
         .get(header::REFERER)
@@ -426,7 +421,12 @@ async fn set_language(
         .get("lang")
         .filter(|v| app.catalogs.definitions().any(|d| d.tag == v.as_str()))
     else {
-        return error_page(StatusCode::BAD_REQUEST, lang(&headers, &app), keys::INVALID);
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            lang(&headers, &app),
+            keys::INVALID,
+            &headers,
+        );
     };
     let dest = headers
         .get(header::REFERER)
@@ -452,7 +452,7 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
     };
     let (guilds, _) = match app.api.guilds().await {
         Ok(v) => v,
-        Err(e) => return api_error(&e, l),
+        Err(e) => return api_error(&e, l, &headers),
     };
     let mut allowed = Vec::new();
     for guild in guilds.as_array().into_iter().flatten() {
@@ -465,26 +465,13 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
                 guild["name"].as_str().unwrap_or(id).to_owned(),
             )),
             Ok(_) => {}
-            Err(e) => return api_error(&e, l),
+            Err(e) => return api_error(&e, l, &headers),
         }
     }
     if allowed.len() == 1 {
         return Redirect::to(&format!("/g/{}", allowed[0].0)).into_response();
     }
-    let mut content = format!("<main><h1>{}</h1><ul>", l.text(keys::SERVERS));
-    for (id, name) in &allowed {
-        let _ = write!(content, "<li><a href=\"/g/{id}\">{}</a></li>", escape(name));
-    }
-    content.push_str("</ul>");
-    if allowed.is_empty() {
-        content.push_str(&l.text(keys::EMPTY));
-    }
-    let _ = write!(
-        content,
-        "<form method=\"post\" action=\"/logout\"><button>{}</button></form></main>",
-        l.text(keys::LOGOUT)
-    );
-    page(l, &headers, &content)
+    Html(views::servers(l, &headers, &allowed)).into_response()
 }
 fn module_names(schema: &Value) -> serde_json::Map<String, Value> {
     let modules = &schema["properties"]["modules"];
@@ -497,27 +484,6 @@ fn module_names(schema: &Value) -> serde_json::Map<String, Value> {
         })
         .cloned()
         .unwrap_or_default()
-}
-fn theme_options(headers: &HeaderMap, language: Locale<'_>) -> String {
-    let current_theme = cookie(headers, "theme").unwrap_or("auto");
-    let mut options = String::new();
-    for (value, key) in [
-        ("auto", keys::AUTO),
-        ("light", keys::LIGHT),
-        ("dark", keys::DARK),
-    ] {
-        let selected = if value == current_theme {
-            " selected"
-        } else {
-            ""
-        };
-        let _ = write!(
-            options,
-            "<option value=\"{value}\"{selected}>{}</option>",
-            language.text(key)
-        );
-    }
-    options
 }
 async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
     let l = lang(&headers, &app);
@@ -532,7 +498,7 @@ async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMa
             (guilds, effective, history, schema)
         }
         (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => {
-            return api_error(&e, l);
+            return api_error(&e, l, &headers);
         }
     };
     let name = guilds
@@ -541,76 +507,19 @@ async fn guild(State(app): State<App>, Path(id): Path<String>, headers: HeaderMa
         .and_then(|g| g["name"].as_str())
         .unwrap_or(&id);
     let modules = module_names(&schema);
-    let active = modules
-        .keys()
-        .filter(|k| effective["modules"][*k]["enabled"] == true)
-        .count();
     let history_items = history.as_array().cloned().unwrap_or_default();
-    let last = history_items
-        .first()
-        .and_then(|v| v["created_at_unix"].as_i64())
-        .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()));
-    let options = theme_options(&headers, l);
-    let mut content = format!(
-        "<div class=\"shell\"><aside><a href=\"/\">{}</a><nav><a href=\"/g/{id}\">{}</a></nav><form method=\"post\" action=\"/logout\"><button>{}</button></form><form method=\"post\" action=\"/theme\"><label>{}<select name=\"theme\">{options}</select></label><button>{}</button></form></aside><div class=\"workspace\"><div class=\"breadcrumb\"><a href=\"/\">{}</a> / {} / {}</div><main><h1>{}</h1><section class=\"stats\"><div class=\"card\">{}<strong>{}</strong></div><div class=\"card\">{}<strong>{active} / {}</strong></div><div class=\"card\">{}<strong>{last}</strong></div></section><section class=\"card\"><h2>{}</h2><table><tbody>",
-        escape(name),
-        l.text(keys::OVERVIEW),
-        l.text(keys::LOGOUT),
-        l.text(keys::THEME),
-        l.text(keys::APPLY),
-        l.text(keys::SERVERS),
-        escape(name),
-        l.text(keys::OVERVIEW),
-        l.text(keys::OVERVIEW),
-        l.text(keys::BOT),
-        l.text(keys::CONNECTED),
-        l.text(keys::ACTIVE),
-        modules.len(),
-        l.text(keys::LAST),
-        l.text(keys::MODULES)
-    );
-    for (module, def) in modules {
-        if !valid_module(&module) {
-            continue;
-        }
-        let title = def["title"].as_str().unwrap_or(&module);
-        let enabled = effective["modules"][&module]["enabled"] == true;
-        let _ = write!(
-            content,
-            "<tr><td>{}</td><td><span class=\"badge\">{}</span></td><td><form method=\"post\" action=\"/g/{id}/modules/{}/toggle\"><input type=\"hidden\" name=\"enabled\" value=\"{}\"><button role=\"switch\" aria-checked=\"{enabled}\" aria-label=\"{}\">◉</button></form></td></tr>",
-            escape(title),
-            l.text(if enabled {
-                keys::ENABLED
-            } else {
-                keys::DISABLED
-            }),
-            escape(&module),
-            !enabled,
-            escape(title)
-        );
-    }
-    let _ = write!(
-        content,
-        "</tbody></table></section><section class=\"card\"><h2>{}</h2><ul>",
-        l.text(keys::RECENT)
-    );
-    if history_items.is_empty() {
-        content.push_str(&l.text(keys::NONE));
-    }
-    for item in history_items.iter().take(4) {
-        let _ = write!(
-            content,
-            "<li>{} · {}</li>",
-            escape(item["actor"].as_str().unwrap_or("—")),
-            item["created_at_unix"]
-                .as_i64()
-                .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()))
-        );
-    }
-    content.push_str("</ul></section></main></div></div>");
-    page(l, &headers, &content)
+    Html(views::overview(
+        l,
+        &headers,
+        &id,
+        name,
+        &modules,
+        &effective,
+        &history_items,
+    ))
+    .into_response()
 }
-fn valid_module(s: &str) -> bool {
+pub(crate) fn valid_module(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
@@ -630,40 +539,40 @@ async fn toggle(
         "false" => Some(false),
         _ => None,
     }) else {
-        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     if !valid_module(&module) {
-        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
     let schema = match app.api.schema(l.bot_language()).await {
         Ok((v, _)) => v,
-        Err(e) => return api_error(&e, l),
+        Err(e) => return api_error(&e, l, &headers),
     };
     if !module_names(&schema).contains_key(&module) {
-        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID);
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
     for attempt in 0..2 {
         let (mut config, etag) = match app.api.config(&id).await {
             Ok(v) => v,
-            Err(e) => return api_error(&e, l),
+            Err(e) => return api_error(&e, l, &headers),
         };
         let Some(etag) = etag else {
-            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
         };
         if !config.is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
         }
         if config["modules"].is_null() {
             config["modules"] = json!({});
         }
         if !config["modules"].is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
         }
         if config["modules"][&module].is_null() {
             config["modules"][&module] = json!({});
         }
         if !config["modules"][&module].is_object() {
-            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID);
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
         }
         config["modules"][&module]["enabled"] = json!(enabled);
         match app.api.put_config(&id, config, &etag, &actor).await {
@@ -675,20 +584,12 @@ async fn toggle(
                     .map(|s| escape(&s))
                     .collect::<Vec<_>>()
                     .join(": ");
-                return (
-                    e.status,
-                    page(
-                        l,
-                        &headers,
-                        &format!("<main><p role=\"alert\">{text}</p></main>"),
-                    ),
-                )
-                    .into_response();
+                return (e.status, Html(views::error(l, &headers, &text))).into_response();
             }
-            Err(e) => return api_error(&e, l),
+            Err(e) => return api_error(&e, l, &headers),
         }
     }
-    error_page(StatusCode::PRECONDITION_FAILED, l, keys::CONFLICT)
+    error_page(StatusCode::PRECONDITION_FAILED, l, keys::CONFLICT, &headers)
 }
 
 #[cfg(test)]

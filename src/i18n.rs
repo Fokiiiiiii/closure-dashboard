@@ -22,7 +22,8 @@ pub mod keys {
         INVALID = "invalid", CONFLICT = "conflict", OAUTH = "oauth", THEME = "theme",
         AUTO = "auto", LIGHT = "light", DARK = "dark", APPLY = "apply",
         LANGUAGE = "language", TIME_NOW = "time-now", TIME_YESTERDAY = "time-yesterday",
-        TIME_MINUTE = "time-minute", TIME_HOUR = "time-hour", TIME_DAY = "time-day"
+        TIME_MINUTE = "time-minute", TIME_HOUR = "time-hour", TIME_DAY = "time-day",
+        NAME = "name", STATUS = "status", NAVIGATION = "navigation"
     }
 }
 
