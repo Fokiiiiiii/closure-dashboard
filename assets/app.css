@@ -74,11 +74,6 @@ nav a[aria-current=page] { font-weight:600; }
 .module-tile:hover,.module-tile:focus-within { border-color:var(--accent); }
 .module-tile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .module-name { min-inline-size:0; font-weight:600; overflow-wrap:anywhere; }
-.module-section { display:flex; flex-direction:column; gap:12px; }
-.module-section h2 { font-size:14px; font-weight:600; color:var(--muted); }
-.module-grid.main { grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); }
-.module-grid.small { grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
-.module-grid.small .module-description { -webkit-line-clamp:2; }
 .module-title { display:flex; align-items:center; gap:8px; min-inline-size:0; }
 .module-icon { flex:none; inline-size:28px; block-size:28px; padding:4px; box-sizing:border-box; border-radius:8px; background:var(--accent-soft); color:var(--accent-text); }
 .module-tile.disabled .module-icon { background:var(--line); color:var(--muted); }

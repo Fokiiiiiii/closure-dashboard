@@ -44,37 +44,6 @@ pub(super) fn module_icon(module: &str) -> String {
     )
 }
 
-/// Modules big enough to have a section of their own, in the order they are shown.
-const MAIN_MODULES: [&str; 5] = ["automod", "moderation", "logs", "channels", "welcome"];
-/// Modules that only carry a permission: switching one off by accident would lock people out.
-const HIDDEN_MODULES: [&str; 1] = ["dashboard"];
-
-fn module_tile(l: Locale<'_>, id: &str, module: &str, schema: &Value, effective: &Value) -> String {
-    let enabled = effective["modules"][module]["enabled"]
-        .as_bool()
-        .unwrap_or(false);
-    let description = schema["description"].as_str().unwrap_or("");
-    let action = if form::fields(schema).is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
-            escape(id),
-            escape(module),
-            l.text(keys::SETTINGS)
-        )
-    };
-    format!(
-        "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
-        if enabled { "enabled" } else { "disabled" },
-        module_icon(module),
-        escape(module),
-        toggle(l, id, module, enabled),
-        escape(description),
-        escape(&super::first_sentence(description))
-    )
-}
-
 pub(crate) fn modules_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -83,36 +52,41 @@ pub(crate) fn modules_page(
     schema: &Value,
     effective: &Value,
 ) -> String {
-    let mut main: Vec<(usize, String)> = Vec::new();
-    let mut small = String::new();
-    for (module, schema) in form::modules(schema) {
-        if !crate::routes::valid_module(&module) || HIDDEN_MODULES.contains(&module.as_str()) {
-            continue;
-        }
-        let tile = module_tile(l, id, &module, &schema, effective);
-        match MAIN_MODULES.iter().position(|m| *m == module) {
-            Some(rank) => main.push((rank, tile)),
-            None => small.push_str(&tile),
-        }
-    }
-    main.sort_by_key(|(rank, _)| *rank);
-    let main: String = main.into_iter().map(|(_, tile)| tile).collect();
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1></header>",
+        "<header class=\"page-heading\"><h1>{}</h1></header><ul class=\"module-grid\">",
         l.text(keys::MODULES)
     );
-    for (heading, class, tiles) in [
-        (keys::MODULES_MAIN, "main", main),
-        (keys::MODULES_SMALL, "small", small),
-    ] {
-        if !tiles.is_empty() {
-            let _ = write!(
-                body,
-                "<section class=\"module-section\"><h2>{}</h2><ul class=\"module-grid {class}\">{tiles}</ul></section>",
-                l.text(heading)
-            );
+    for (module, schema) in form::modules(schema) {
+        if !crate::routes::valid_module(&module) {
+            continue;
         }
+        let enabled = effective["modules"][&module]["enabled"]
+            .as_bool()
+            .unwrap_or(false);
+        let description = schema["description"].as_str().unwrap_or("");
+        let title = module.as_str();
+        let action = if form::fields(&schema).is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
+                escape(id),
+                escape(&module),
+                l.text(keys::SETTINGS)
+            )
+        };
+        let _ = write!(
+            body,
+            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
+            if enabled { "enabled" } else { "disabled" },
+            module_icon(&module),
+            escape(title),
+            toggle(l, id, &module, enabled),
+            escape(description),
+            escape(&super::first_sentence(description))
+        );
     }
+    body.push_str("</ul>");
     shell(l, headers, id, name, keys::MODULES, &body, false)
 }
 
@@ -121,43 +95,6 @@ mod tests {
     use super::*;
     use crate::i18n::{Catalogs, REGISTRY};
     use serde_json::json;
-
-    #[test]
-    fn modules_are_split_by_size_and_the_permission_only_module_is_hidden() {
-        let catalogs = Catalogs::new(REGISTRY).unwrap();
-        let schema = json!({"properties":{"modules":{"properties":{
-            "remind":{"description":"r"},
-            "dashboard":{"description":""},
-            "logs":{"description":"l"},
-            "automod":{"description":"a"},
-            "zeta":{"description":"z"}
-        }}}});
-        let html = modules_page(
-            catalogs.locale("en"),
-            &HeaderMap::new(),
-            "42",
-            "server",
-            &schema,
-            &json!({}),
-        );
-        assert!(!html.contains("modules/dashboard"));
-        let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at("Main features") < at("modules/automod/toggle"));
-        assert!(at("modules/automod/toggle") < at("modules/logs/toggle"));
-        assert!(at("modules/logs/toggle") < at("Small features"));
-        assert!(at("Small features") < at("modules/remind/toggle"));
-        assert!(at("Small features") < at("modules/zeta/toggle"));
-        let only_small = json!({"properties":{"modules":{"properties":{"remind":{}}}}});
-        let html = modules_page(
-            catalogs.locale("en"),
-            &HeaderMap::new(),
-            "42",
-            "server",
-            &only_small,
-            &json!({}),
-        );
-        assert!(!html.contains("Main features"));
-    }
 
     #[test]
     fn every_known_module_has_its_own_icon_and_unknown_ones_a_plain_box() {
@@ -203,7 +140,7 @@ mod tests {
             &schema,
             &effective,
         );
-        assert!(page.contains("<ul class=\"module-grid small\">"));
+        assert!(page.contains("<ul class=\"module-grid\">"));
         let tiles: Vec<_> = page
             .split("<li class=\"card module-tile ")
             .skip(1)
