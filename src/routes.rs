@@ -241,13 +241,14 @@ fn api_error(error: &ApiError, language: Locale<'_>, headers: &HeaderMap) -> Res
     error_page(error.status, language, key, headers)
 }
 async fn login(State(app): State<App>, headers: HeaderMap) -> Response {
-    let l = lang(&headers, &app);
-    Html(views::login(
-        l,
-        &headers,
-        cfg!(debug_assertions) && app.config.dev_user.is_some(),
-    ))
-    .into_response()
+    if user(&headers, &app).is_some() {
+        return Redirect::to("/").into_response();
+    }
+    // The page exists only for the development login; otherwise sign-in is Discord and nothing else.
+    if !(cfg!(debug_assertions) && app.config.dev_user.is_some()) {
+        return Redirect::to("/auth/discord").into_response();
+    }
+    Html(views::login(lang(&headers, &app), &headers, true)).into_response()
 }
 async fn discord(State(app): State<App>, headers: HeaderMap) -> Response {
     let mut bytes = [0_u8; 32];
