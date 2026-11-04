@@ -117,3 +117,7 @@ timeout-kind = Timeout
 kick-kind = Kick
 ban-kind = Ban
 vcmute-kind = VC mute
+opt-discord = Discord
+opt-role = Role
+opt-private = Only me
+opt-public = Everyone

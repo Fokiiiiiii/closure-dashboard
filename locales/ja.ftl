@@ -99,3 +99,7 @@ timeout-kind = タイムアウト
 kick-kind = キック
 ban-kind = BAN
 vcmute-kind = VC ミュート
+opt-discord = Discord
+opt-role = ロール
+opt-private = 本人のみ
+opt-public = 全員

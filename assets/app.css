@@ -9,8 +9,12 @@
   --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100; --series-5:#e87ba4;
 }
 .settings-help { color:var(--muted); font-size:.85rem; line-height:1.5; overflow-wrap:anywhere; margin-block:6px 0; }
-.role-list { display:grid; gap:8px; max-block-size:240px; overflow:auto; }
-.role-option { display:flex; align-items:center; gap:8px; overflow-wrap:anywhere; }
+.role-list { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
+.role-option { position:relative; display:inline-flex; align-items:center; gap:6px; min-block-size:28px; padding-inline:10px; border:1px solid var(--line); border-radius:999px; background:var(--field); color:var(--muted); cursor:pointer; overflow-wrap:anywhere; }
+.role-option input { position:absolute; opacity:0; inline-size:1px; block-size:1px; }
+.role-option:has(input:checked) { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-text); }
+.role-option:has(input:checked)::before { content:"✓"; }
+.role-option:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
 .role-option svg { flex:none; }
 @media (prefers-color-scheme:dark) {
   :root {
@@ -44,7 +48,7 @@ button:active,.button:active { transform:scale(.98); }
 .card { background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); }
 .shell { display:flex; min-height:100vh; }
 .sidebar { flex:0 0 232px; display:flex; flex-direction:column; gap:20px; padding:18px 12px; background:var(--surface); border-inline-end:1px solid var(--line); min-inline-size:0; position:sticky; inset-block-start:0; align-self:flex-start; block-size:100vh; overflow-y:auto; box-sizing:border-box; }
-.server-name,.server-link { display:flex; align-items:center; gap:10px; min-inline-size:0; }
+.server-name,.server-link { display:flex; align-items:center; gap:8px; min-inline-size:0; }
 .server-name { padding-block:7px; padding-inline:8px 10px; border:1px solid var(--line); border-radius:10px; font-weight:500; }
 .server-name span:nth-child(2),.server-link span:nth-child(2) { flex:1; min-inline-size:0; overflow-wrap:anywhere; }
 .server-link span:last-child { color:var(--muted); }
@@ -64,15 +68,15 @@ nav a[aria-current=page] { font-weight:600; }
 .muted { color:var(--muted); font-weight:500; }
 .panel { overflow:hidden; }
 .panel h2 { padding:12px 16px; border-block-end:1px solid var(--line); }
-.module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; list-style:none; padding:0; margin:0; }
-.module-tile { display:flex; flex-direction:column; gap:10px; min-inline-size:0; min-block-size:180px; aspect-ratio:1 / 1; padding:16px; }
+.module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; list-style:none; padding:0; margin:0; }
+.module-tile { display:flex; flex-direction:column; gap:10px; min-inline-size:0; padding:14px; }
 .module-tile.disabled { background:var(--field); }
 .module-tile:hover,.module-tile:focus-within { border-color:var(--accent); }
 .module-tile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .module-name { min-inline-size:0; font-weight:600; overflow-wrap:anywhere; }
 .module-tile-heading form { flex:none; }
-.module-action { margin-block-start:auto; min-block-size:44px; }
-.module-description { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; overflow-wrap:anywhere; font-size:12px; }
+.module-action { margin-block-start:auto; min-block-size:36px; }
+.module-description { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; overflow-wrap:anywhere; font-size:12px; }
 .pill { inline-size:fit-content; padding:1px 9px; border-radius:999px; font-size:12px; font-weight:500; }
 .switch { position:relative; display:block; inline-size:38px; block-size:22px; padding:0; border:0; border-radius:11px; background:var(--off); transition-property:background-color,transform; transition-duration:150ms; transition-timing-function:ease-out; }
 .switch[aria-checked=true] { background:var(--on); }
@@ -81,8 +85,8 @@ nav a[aria-current=page] { font-weight:600; }
 .switch::after { content:''; position:absolute; inset-block-start:2px; inset-inline-start:2px; inline-size:18px; block-size:18px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.3); transition:transform 150ms ease-out; }
 .switch[aria-checked=true]::after { transform:translateX(16px); }
 [dir=rtl] .switch[aria-checked=true]::after { transform:translateX(-16px); }
-.settings-card { overflow:hidden; margin-block-end:80px; }
-.settings-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,240px); gap:16px; align-items:center; padding:14px 16px; }
+.settings-card { overflow:hidden; margin-block-end:72px; }
+.settings-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,240px); gap:16px; align-items:center; padding:10px 16px; }
 .settings-row + .settings-row { border-block-start:1px solid var(--line); }
 form:not(:has(input[name="f.timeout_method"][value="role"]:checked)) .when[data-when="timeout_method=role"],
 form:not(:has(input[name="f.voice_mute_method"][value="role"]:checked)) .when[data-when="voice_mute_method=role"] { display:none; }

@@ -32,6 +32,23 @@ fn option(output: &mut String, value: &str, label: &str, selected: bool) {
     );
 }
 
+/// The shown text of one choice: translated when it is a value the dashboard knows, else as sent.
+fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
+    let server_language =
+        field.name == "language" && field.schema["x-ui"]["server_settings"] == true;
+    let key = match value {
+        "auto" if server_language => keys::LANG_AUTO,
+        "ja" if server_language => keys::LANG_JA,
+        "en" if server_language => keys::LANG_EN,
+        "discord" => keys::OPT_DISCORD,
+        "role" => keys::OPT_ROLE,
+        "private" => keys::OPT_PRIVATE,
+        "public" => keys::OPT_PUBLIC,
+        _ => return escape(value),
+    };
+    l.text(key)
+}
+
 #[allow(clippy::too_many_lines)]
 pub(super) fn control(
     l: Locale<'_>,
@@ -121,16 +138,7 @@ pub(super) fn control(
                     } else {
                         ""
                     },
-                    if field.name == "language" && field.schema["x-ui"]["server_settings"] == true {
-                        match v.as_str() {
-                            "auto" => l.text(keys::LANG_AUTO),
-                            "ja" => l.text(keys::LANG_JA),
-                            "en" => l.text(keys::LANG_EN),
-                            _ => escape(v),
-                        }
-                    } else {
-                        escape(v)
-                    }
+                    enum_label(l, field, v)
                 );
             }
             result.push_str("</div>");
@@ -139,7 +147,14 @@ pub(super) fn control(
         Kind::Enum(values) => {
             let mut result = format!("<select {attrs}>");
             for v in values {
-                option(&mut result, v, v, v == value);
+                // The label comes back already escaped, so it must not go through `option` again.
+                let _ = write!(
+                    result,
+                    "<option value=\"{}\"{}>{}</option>",
+                    escape(v),
+                    if v == value { " selected" } else { "" },
+                    enum_label(l, field, v)
+                );
             }
             result.push_str("</select>");
             result

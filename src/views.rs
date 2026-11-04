@@ -214,10 +214,9 @@ mod tests {
         let css = include_str!("../assets/app.css");
         assert!(css.len() <= 24_576);
         for required in [
-            ".module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px",
-            "aspect-ratio:1 / 1",
-            "min-block-size:180px",
-            "-webkit-line-clamp:4",
+            ".module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px",
+            "-webkit-line-clamp:3",
+            ".role-option:has(input:checked)",
             "max-inline-size:1200px; margin-inline:auto",
             ".content.narrow { max-inline-size:760px",
             ".form-segments",
@@ -226,6 +225,8 @@ mod tests {
             assert!(css.contains(required), "{required}");
         }
         assert!(!css.contains(".segments"));
+        // Tiles size to their content: a square would leave most of each one empty.
+        assert!(!css.contains("aspect-ratio"));
         for unused in [
             ".breadcrumb",
             ".form-breadcrumb",
