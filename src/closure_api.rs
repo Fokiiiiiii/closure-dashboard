@@ -1,0 +1,286 @@
+use crate::config::Config;
+use axum::{
+    body::Body,
+    http::{Method, Request, StatusCode},
+};
+use http_body_util::BodyExt;
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
+use serde_json::Value;
+use std::time::Duration;
+
+#[derive(Clone)]
+pub struct Api {
+    client: Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>,
+    base: String,
+    token: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorKind {
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    Conflict,
+    Validation,
+    Precondition,
+    Unavailable,
+    RateLimited,
+    TooLarge,
+    Other,
+}
+#[derive(Debug, Clone)]
+pub struct ApiIssue {
+    pub path: String,
+    pub code: String,
+    pub message: String,
+}
+#[derive(Debug, Clone)]
+pub struct ApiError {
+    pub status: StatusCode,
+    pub kind: ErrorKind,
+    pub code: String,
+    pub message: String,
+    pub issues: Vec<ApiIssue>,
+}
+impl ApiError {
+    fn new(status: StatusCode, message: String, issues: Vec<ApiIssue>) -> Self {
+        let kind = match status.as_u16() {
+            401 => ErrorKind::Unauthorized,
+            403 => ErrorKind::Forbidden,
+            404 => ErrorKind::NotFound,
+            412 => ErrorKind::Conflict,
+            422 => ErrorKind::Validation,
+            428 => ErrorKind::Precondition,
+            503 => ErrorKind::Unavailable,
+            429 => ErrorKind::RateLimited,
+            413 => ErrorKind::TooLarge,
+            _ => ErrorKind::Other,
+        };
+        Self {
+            status,
+            kind,
+            code: String::new(),
+            message,
+            issues,
+        }
+    }
+    fn unavailable() -> Self {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, String::new(), Vec::new())
+    }
+}
+impl Api {
+    #[must_use]
+    pub fn new(config: &Config) -> Self {
+        let mut http = HttpConnector::new();
+        http.enforce_http(false);
+        http.set_connect_timeout(Some(Duration::from_secs(3)));
+        let connector = HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_http1()
+            .wrap_connector(http);
+        Self {
+            client: Client::builder(TokioExecutor::new()).build(connector),
+            base: config.api_url.trim_end_matches('/').into(),
+            token: config.admin_token.0.clone(),
+        }
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        etag: Option<&str>,
+        actor: Option<&str>,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(format!("{}{path}", self.base))
+            .header("accept", "application/json")
+            .header("authorization", format!("Bearer {}", self.token));
+        if let Some(e) = etag {
+            builder = builder.header("if-match", e);
+        }
+        if let Some(a) = actor {
+            builder = builder.header("x-closure-actor", a);
+        }
+        let request_body = if let Some(data) = body {
+            builder = builder.header("content-type", "application/json");
+            Body::from(data.to_string())
+        } else {
+            Body::empty()
+        };
+        let request = builder
+            .body(request_body)
+            .map_err(|_| ApiError::unavailable())?;
+        let response = tokio::time::timeout(Duration::from_secs(10), async {
+            let response = self
+                .client
+                .request(request)
+                .await
+                .map_err(|_| ApiError::unavailable())?;
+            let status = response.status();
+            let etag = response
+                .headers()
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.replace(&self.token, "[redacted]"));
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .map_err(|_| ApiError::unavailable())?
+                .to_bytes();
+            Ok::<_, ApiError>((status, etag, bytes))
+        })
+        .await
+        .map_err(|_| ApiError::unavailable())??;
+        let (status, etag, bytes) = response;
+        let mut data: Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) if !status.is_success() => {
+                return Err(ApiError::new(status, String::new(), vec![]));
+            }
+            Err(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    String::new(),
+                    vec![],
+                ));
+            }
+        };
+        redact(&mut data, &self.token);
+        if !status.is_success() {
+            let error = &data["error"];
+            let message = error["message"].as_str().unwrap_or("").to_owned();
+            let issues = error["issues"].as_array().map_or_else(Vec::new, |a| {
+                a.iter()
+                    .map(|x| ApiIssue {
+                        path: x["path"].as_str().unwrap_or("").to_owned(),
+                        code: x["code"].as_str().unwrap_or("").to_owned(),
+                        message: x["message"].as_str().unwrap_or("").to_owned(),
+                    })
+                    .collect()
+            });
+            let mut result = ApiError::new(status, message, issues);
+            error["code"]
+                .as_str()
+                .unwrap_or("http_error")
+                .clone_into(&mut result.code);
+            return Err(result);
+        }
+        Ok((data, etag))
+    }
+
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn guilds(&self) -> Result<(Value, Option<String>), ApiError> {
+        self.request(Method::GET, "/v1/guilds", None, None, None)
+            .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn access(
+        &self,
+        guild: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/access/{actor}"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn schema(&self, locale: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/schema?locale={locale}"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn effective(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/config/effective"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn history(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/config/history?limit=4"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn config(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/config"),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn put_config(
+        &self,
+        guild: &str,
+        value: Value,
+        etag: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::PUT,
+            &format!("/v1/guilds/{guild}/config"),
+            Some(value),
+            Some(etag),
+            Some(actor),
+        )
+        .await
+    }
+}
+fn redact(value: &mut Value, secret: &str) {
+    match value {
+        Value::String(s) => *s = s.replace(secret, "[redacted]"),
+        Value::Array(a) => {
+            for v in a {
+                redact(v, secret);
+            }
+        }
+        Value::Object(o) => {
+            let old = std::mem::take(o);
+            for (key, mut v) in old {
+                redact(&mut v, secret);
+                o.insert(key.replace(secret, "[redacted]"), v);
+            }
+        }
+        _ => {}
+    }
+}
