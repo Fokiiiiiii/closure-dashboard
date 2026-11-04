@@ -18,7 +18,7 @@ pub(crate) fn overview(
     stats: Option<&Value>,
 ) -> String {
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1><div class=\"segments range\" role=\"group\" aria-label=\"{}\">",
+        "<header class=\"page-heading\"><h1>{}</h1><div class=\"range\" role=\"group\" aria-label=\"{}\">",
         l.text(keys::OVERVIEW),
         l.text(keys::PERIOD)
     );
@@ -42,7 +42,7 @@ pub(crate) fn overview(
             "<section class=\"card empty\">{}</section>",
             l.text(keys::STATS_FAILED)
         );
-        return shell(l, headers, id, name, keys::OVERVIEW, &body);
+        return shell(l, headers, id, name, keys::OVERVIEW, &body, false);
     };
     let members = &s["members"];
     let messages = &s["messages"];
@@ -182,7 +182,7 @@ pub(crate) fn overview(
         let _ = write!(body, "<p class=\"empty\">{}</p>", l.text(keys::NO_DATA));
     }
     body.push_str("</section>");
-    shell(l, headers, id, name, keys::OVERVIEW, &body)
+    shell(l, headers, id, name, keys::OVERVIEW, &body, false)
 }
 
 #[cfg(test)]

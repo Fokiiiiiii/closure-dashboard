@@ -7,50 +7,12 @@ use crate::{
     i18n::{Locale, keys},
 };
 
-fn theme(headers: &HeaderMap) -> &str {
-    super::routes::cookie(headers, "theme")
-        .filter(|v| matches!(*v, "light" | "dark"))
-        .unwrap_or("auto")
-}
-
-pub(crate) fn page(l: Locale<'_>, headers: &HeaderMap, content: &str) -> String {
+pub(crate) fn page(l: Locale<'_>, _headers: &HeaderMap, content: &str) -> String {
     format!(
-        "<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body>{content}</body></html>",
+        "<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"auto\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body>{content}</body></html>",
         escape(l.tag()),
         escape(l.dir()),
-        theme(headers),
         l.text(keys::TITLE)
-    )
-}
-
-fn segmented(l: Locale<'_>, headers: &HeaderMap) -> String {
-    let mut languages = String::new();
-    for d in l.catalogs().definitions() {
-        let _ = write!(
-            languages,
-            "<button type=\"submit\" name=\"lang\" value=\"{}\" aria-pressed=\"{}\">{}</button>",
-            escape(d.tag),
-            d.tag == l.tag(),
-            escape(d.name)
-        );
-    }
-    let mut themes = String::new();
-    for (value, key) in [
-        ("auto", keys::AUTO),
-        ("light", keys::LIGHT),
-        ("dark", keys::DARK),
-    ] {
-        let _ = write!(
-            themes,
-            "<button type=\"submit\" name=\"theme\" value=\"{value}\" aria-pressed=\"{}\">{}</button>",
-            value == theme(headers),
-            l.text(key)
-        );
-    }
-    format!(
-        "<form class=\"segments\" method=\"post\" action=\"/lang\" aria-label=\"{}\">{languages}</form><form class=\"segments\" method=\"post\" action=\"/theme\" aria-label=\"{}\">{themes}</form>",
-        l.text(keys::LANGUAGE),
-        l.text(keys::THEME)
     )
 }
 
@@ -70,8 +32,7 @@ pub(crate) fn card_page(l: Locale<'_>, headers: &HeaderMap, body: &str) -> Strin
         l,
         headers,
         &format!(
-            "<main class=\"center\"><div class=\"center-column\"><div class=\"card auth-card\">{body}</div><div class=\"center-footer\">{}</div></div></main>",
-            segmented(l, headers)
+            "<main class=\"center\"><div class=\"center-column\"><div class=\"card auth-card\">{body}</div></div></main>"
         ),
     )
 }
@@ -122,9 +83,8 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
     }
     let _ = write!(
         body,
-        "</div><div class=\"center-footer\">{}{}</div></div></main>",
-        logout(l),
-        segmented(l, headers)
+        "</div><div class=\"center-footer\">{}</div></div></main>",
+        logout(l)
     );
     page(l, headers, &body)
 }
@@ -151,6 +111,7 @@ pub(crate) fn shell(
     name: &str,
     current: &str,
     content: &str,
+    narrow: bool,
 ) -> String {
     let mut nav = String::new();
     for (path, key, icon) in [
@@ -192,14 +153,14 @@ pub(crate) fn shell(
         l,
         headers,
         &format!(
-            "<div class=\"shell\"><aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">⌄</span></div><nav aria-label=\"{}\">{nav}</nav><div class=\"sidebar-footer\">{}{}</div></aside><div class=\"workspace\"><div class=\"breadcrumb\">{} / {}</div><main class=\"content\">{content}</main></div></div>",
+            "<div class=\"shell\"><aside class=\"sidebar\"><div class=\"server-name\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">⌄</span></div><nav aria-label=\"{}\">{nav}</nav><div class=\"sidebar-footer\">{}</div></aside><div class=\"workspace\"><div class=\"breadcrumb\">{} / {}</div><main class=\"content{}\">{content}</main></div></div>",
             avatar(name),
             escape(name),
             l.text(keys::NAVIGATION),
-            segmented(l, headers),
             logout(l),
             escape(name),
-            l.text(current)
+            l.text(current),
+            if narrow { " narrow" } else { "" }
         ),
     )
 }
@@ -210,7 +171,7 @@ mod tests {
     use crate::i18n::{Catalogs, REGISTRY};
 
     #[test]
-    fn segments_and_card_pages() {
+    fn card_pages_have_no_preference_controls() {
         let catalogs = Catalogs::new(REGISTRY).unwrap();
         let l = catalogs.locale("en");
         let mut headers = HeaderMap::new();
@@ -219,30 +180,42 @@ mod tests {
             login(l, &headers, true),
             servers(l, &headers, &[("42".into(), "<script>".into())]),
             error(l, &headers, "error"),
+            shell(l, &headers, "42", "server", keys::MODULES, "content", false),
         ];
         for html in &pages {
-            for expected in [
-                "class=\"card",
-                "data-theme=\"dark\"",
-                "name=\"lang\" value=\"en\" aria-pressed=\"true\"",
-                "name=\"lang\" value=\"ja\" aria-pressed=\"false\"",
-                "name=\"theme\" value=\"dark\" aria-pressed=\"true\"",
-                "name=\"theme\" value=\"auto\" aria-pressed=\"false\"",
-                "name=\"theme\" value=\"light\" aria-pressed=\"false\"",
+            assert!(html.contains("data-theme=\"auto\""));
+            for forbidden in [
+                "name=\"lang\"",
+                "name=\"theme\"",
+                "aria-label=\"Language\"",
+                "aria-label=\"Theme\"",
+                "style=",
             ] {
-                assert!(html.contains(expected), "{expected}");
+                assert!(!html.contains(forbidden), "{forbidden}");
             }
-            assert_eq!(html.matches("aria-pressed=\"true\"").count(), 2);
-            assert!(!html.contains("style="));
         }
         assert!(pages[1].contains("&lt;script&gt;"));
         assert!(pages[2].contains("role=\"alert\""));
+        assert!(pages[3].contains("action=\"/logout\""));
     }
 
     #[test]
     fn stylesheet_constraints() {
         let css = include_str!("../assets/app.css");
         assert!(css.len() <= 24_576);
+        for required in [
+            ".module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px",
+            "aspect-ratio:1 / 1",
+            "min-block-size:180px",
+            "-webkit-line-clamp:4",
+            "max-inline-size:1200px; margin-inline:auto",
+            ".content.narrow { max-inline-size:760px",
+            ".form-segments",
+            "@media (prefers-color-scheme:dark)",
+        ] {
+            assert!(css.contains(required), "{required}");
+        }
+        assert!(!css.contains(".segments"));
         for forbidden in [
             "http:",
             "https:",

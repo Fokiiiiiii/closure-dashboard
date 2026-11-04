@@ -37,7 +37,7 @@ fn render(
 
 fn conflict(app: &App, headers: &HeaderMap, id: &str) -> Response {
     let l = lang(headers, app);
-    (StatusCode::PRECONDITION_FAILED, Html(views::shell(l, headers, id, id, keys::SERVER_SETTINGS, &format!("<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"/g/{}/settings\">{}</a>", l.text(keys::CONFLICT_RELOAD), escape(id), l.text(keys::RELOAD))))).into_response()
+    (StatusCode::PRECONDITION_FAILED, Html(views::shell(l, headers, id, id, keys::SERVER_SETTINGS, &format!("<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"/g/{}/settings\">{}</a>", l.text(keys::CONFLICT_RELOAD), escape(id), l.text(keys::RELOAD)), true))).into_response()
 }
 
 pub(super) async fn edit(

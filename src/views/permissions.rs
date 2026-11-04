@@ -90,5 +90,5 @@ pub(crate) fn permissions(
         );
     }
     body.push_str("</section>");
-    shell(l, headers, id, name, keys::PERMISSIONS, &body)
+    shell(l, headers, id, name, keys::PERMISSIONS, &body, true)
 }

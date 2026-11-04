@@ -126,6 +126,41 @@ async fn list_and_form_render_schema_and_directory() {
 }
 
 #[tokio::test]
+async fn pages_keep_logout_without_preference_controls_and_use_correct_width() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    for (path, narrow) in [
+        ("/g/42", false),
+        ("/g/42/modules", false),
+        ("/g/42/history", false),
+        ("/g/42/modules/welcome", true),
+        ("/g/42/settings", true),
+        ("/g/42/permissions", true),
+    ] {
+        let page = html(response(&config, Method::GET, path, "").await).await;
+        assert!(page.contains("action=\"/logout\""), "{path}");
+        assert!(
+            page.contains(if narrow {
+                "class=\"content narrow\""
+            } else {
+                "class=\"content\""
+            }),
+            "{path}"
+        );
+        for forbidden in [
+            "name=\"lang\"",
+            "name=\"theme\"",
+            "aria-label=\"言語\"",
+            "aria-label=\"テーマ\"",
+            "aria-label=\"Language\"",
+            "aria-label=\"Theme\"",
+        ] {
+            assert!(!page.contains(forbidden), "{path}: {forbidden}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn save_and_error_paths() {
     let (config, state) = setup().await;
     state.lock().unwrap().forms = true;

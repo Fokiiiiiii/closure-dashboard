@@ -241,5 +241,6 @@ pub(crate) fn settings_page(l: Locale<'_>, headers: &HeaderMap, data: &SettingsP
         data.guild,
         keys::SERVER_SETTINGS,
         &body,
+        true,
     )
 }

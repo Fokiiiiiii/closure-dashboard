@@ -59,6 +59,7 @@ fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Re
             id,
             keys::MODULES,
             &format!("<p class=\"error\" role=\"alert\">{}</p>", l.text(key)),
+            false,
         )),
     )
         .into_response()
@@ -81,7 +82,7 @@ pub(super) fn return_path(app: &App, headers: &HeaderMap, id: &str) -> String {
 
 fn conflict(app: &App, headers: &HeaderMap, id: &str, module: &str) -> Response {
     let l = lang(headers, app);
-    (StatusCode::PRECONDITION_FAILED, Html(views::shell(l, headers, id, id, keys::MODULES, &format!("<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"/g/{}/modules/{}\">{}</a>", l.text(keys::CONFLICT_RELOAD), escape(id), escape(module), l.text(keys::RELOAD))))).into_response()
+    (StatusCode::PRECONDITION_FAILED, Html(views::shell(l, headers, id, id, keys::MODULES, &format!("<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"/g/{}/modules/{}\">{}</a>", l.text(keys::CONFLICT_RELOAD), escape(id), escape(module), l.text(keys::RELOAD)), true))).into_response()
 }
 
 #[allow(clippy::too_many_arguments)]

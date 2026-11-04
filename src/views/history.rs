@@ -105,7 +105,7 @@ pub(crate) fn history(
         let _ = write!(body, "<p class=\"empty\">{}</p>", l.text(keys::NONE));
     }
     body.push_str("</section>");
-    shell(l, headers, id, name, keys::HISTORY, &body)
+    shell(l, headers, id, name, keys::HISTORY, &body, false)
 }
 #[cfg(test)]
 mod tests {

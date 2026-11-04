@@ -51,8 +51,6 @@ pub fn router(config: Config) -> Router {
         .route("/auth/callback", get(callback))
         .route("/auth/dev", post(dev))
         .route("/logout", post(logout))
-        .route("/theme", post(theme))
-        .route("/lang", post(set_language))
         .route("/g/{id}", get(guild))
         .route("/g/{id}/history", get(history_page))
         .route("/g/{id}/permissions", get(permissions_page))
@@ -80,7 +78,7 @@ pub fn router(config: Config) -> Router {
 }
 fn lang<'a>(headers: &HeaderMap, app: &'a App) -> Locale<'a> {
     app.catalogs.negotiate(
-        cookie(headers, "lang"),
+        None,
         headers
             .get(header::ACCEPT_LANGUAGE)
             .and_then(|v| v.to_str().ok()),
@@ -143,10 +141,7 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     let request_headers = request.headers().clone();
     let path = request.uri().path();
     let language = lang(request.headers(), &app);
-    let public = matches!(
-        path,
-        "/login" | "/app.css" | "/healthz" | "/lang" | "/theme"
-    ) || path.starts_with("/auth/");
+    let public = matches!(path, "/login" | "/app.css" | "/healthz") || path.starts_with("/auth/");
     let mut response = if request.method() == Method::POST && !csrf(request.headers(), &app) {
         error_page(
             StatusCode::FORBIDDEN,
@@ -394,67 +389,6 @@ async fn logout(State(app): State<App>) -> Response {
     set_cookie(
         Redirect::to("/login").into_response(),
         &cookie_value(&app, "session", "", 0),
-    )
-}
-async fn theme(
-    State(app): State<App>,
-    headers: HeaderMap,
-    axum::Form(form): axum::Form<HashMap<String, String>>,
-) -> Response {
-    let Some(value) = form
-        .get("theme")
-        .filter(|v| matches!(v.as_str(), "light" | "dark" | "auto"))
-    else {
-        return error_page(
-            StatusCode::BAD_REQUEST,
-            lang(&headers, &app),
-            keys::INVALID,
-            &headers,
-        );
-    };
-    let dest = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<axum::http::Uri>().ok())
-        .and_then(|u| u.path_and_query().map(|p| p.as_str().to_owned()))
-        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
-        .unwrap_or_else(|| "/".into());
-    set_cookie(
-        Redirect::to(&dest).into_response(),
-        &cookie_value(&app, "theme", value, 31_536_000),
-    )
-}
-async fn set_language(
-    State(app): State<App>,
-    headers: HeaderMap,
-    axum::Form(form): axum::Form<HashMap<String, String>>,
-) -> Response {
-    let Some(value) = form
-        .get("lang")
-        .filter(|v| app.catalogs.definitions().any(|d| d.tag == v.as_str()))
-    else {
-        return error_page(
-            StatusCode::BAD_REQUEST,
-            lang(&headers, &app),
-            keys::INVALID,
-            &headers,
-        );
-    };
-    let dest = headers
-        .get(header::REFERER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<axum::http::Uri>().ok())
-        .filter(|u| {
-            u.scheme_str()
-                .zip(u.authority())
-                .is_some_and(|(s, a)| Some(format!("{s}://{a}")) == own_origin(&app))
-        })
-        .and_then(|u| u.path_and_query().map(|p| p.as_str().to_owned()))
-        .filter(|p| p.starts_with('/') && !p.starts_with("//") && !p.contains('\\'))
-        .unwrap_or_else(|| "/".into());
-    set_cookie(
-        Redirect::to(&dest).into_response(),
-        &cookie_value(&app, "lang", value, 31_536_000),
     )
 }
 async fn index(State(app): State<App>, headers: HeaderMap) -> Response {

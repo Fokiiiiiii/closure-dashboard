@@ -16,78 +16,23 @@ use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn language_selection_and_rendering() {
+async fn language_negotiation_and_removed_routes() {
     let (config, _) = setup().await;
-    for (referer, expected) in [
-        ("http://localhost/g/42?tab=x", "/g/42?tab=x"),
-        ("http://localhost//evil.example", "/"),
-        ("https://evil.example/", "/"),
-        ("http://localhost/\\evil.example", "/"),
-    ] {
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri("/lang")
-            .header(header::ORIGIN, "http://localhost")
-            .header(header::REFERER, referer)
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("lang=en"))
+    for path in ["/lang", "/theme"] {
+        let response = router(config.clone())
+            .oneshot(request(&config, Method::POST, path, ""))
+            .await
             .unwrap();
-        let response = router(config.clone()).oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(response.headers()[header::LOCATION], expected);
-        let cookie = response.headers()[header::SET_COOKIE].to_str().unwrap();
-        for value in ["lang=en", "Path=/", "Max-Age=31536000", "SameSite=Lax"] {
-            assert!(cookie.contains(value));
-        }
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
     let req = Request::builder()
-        .method(Method::POST)
-        .uri("/lang")
-        .header(header::ORIGIN, "http://localhost")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from("lang=evil"))
-        .unwrap();
-    assert_eq!(
-        router(config.clone()).oneshot(req).await.unwrap().status(),
-        StatusCode::BAD_REQUEST
-    );
-    let req = Request::builder()
-        .method(Method::POST)
-        .uri("/lang")
-        .header(header::ORIGIN, "http://evil.example")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from("lang=en"))
-        .unwrap();
-    assert_eq!(
-        router(config.clone()).oneshot(req).await.unwrap().status(),
-        StatusCode::FORBIDDEN
-    );
-    let req = Request::builder()
-        .method(Method::POST)
-        .uri("/lang")
-        .header(header::ORIGIN, "http://localhost")
-        .header(header::COOKIE, "lang=en")
-        .body(Body::from("lang=en"))
-        .unwrap();
-    let response = router(config.clone()).oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), 65536)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(body.contains("Could not save the configuration"));
-    let req = Request::builder()
         .uri("/login")
-        .header(header::COOKIE, "lang=en")
-        .header(header::ACCEPT_LANGUAGE, "ja")
+        .header(header::COOKIE, "lang=ja; theme=dark")
+        .header(header::ACCEPT_LANGUAGE, "en")
         .body(Body::empty())
         .unwrap();
     let response = router(config).oneshot(req).await.unwrap();
     assert_eq!(response.headers()[header::CONTENT_LANGUAGE], "en");
-    assert_eq!(response.headers()[header::VARY], "Accept-Language, Cookie");
     let body = String::from_utf8(
         to_bytes(response.into_body(), 65536)
             .await
@@ -95,9 +40,10 @@ async fn language_selection_and_rendering() {
             .to_vec(),
     )
     .unwrap();
-    assert!(body.contains("<html lang=\"en\" dir=\"ltr\""));
+    assert!(body.contains("<html lang=\"en\" dir=\"ltr\" data-theme=\"auto\""));
     assert!(body.contains("Sign in with Discord"));
-    assert!(body.contains("name=\"lang\" value=\"en\" aria-pressed=\"true\""));
+    assert!(!body.contains("name=\"lang\""));
+    assert!(!body.contains("name=\"theme\""));
 }
 
 #[derive(Default)]
@@ -593,8 +539,8 @@ async fn csrf_state_body_and_validation() {
     let large = request(
         &config,
         Method::POST,
-        "/theme",
-        &format!("theme={}", "a".repeat(65 * 1024)),
+        "/g/42/modules/mod/toggle",
+        &format!("enabled={}", "a".repeat(65 * 1024)),
     );
     assert_eq!(
         router(config).oneshot(large).await.unwrap().status(),

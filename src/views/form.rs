@@ -260,5 +260,5 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         l.text(keys::DISCARD),
         l.text(keys::SAVE)
     );
-    shell(l, headers, id, guild, keys::MODULES, &body)
+    shell(l, headers, id, guild, keys::MODULES, &body, true)
 }
