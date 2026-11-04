@@ -75,7 +75,12 @@ nav a[aria-current=page] { font-weight:600; }
 .module-tile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .module-name { min-inline-size:0; font-weight:600; overflow-wrap:anywhere; }
 .module-section { display:flex; flex-direction:column; gap:12px; }
-.module-section h2 { font-size:14px; font-weight:600; color:var(--muted); }
+.module-section + .module-section { margin-block-start:16px; }
+.module-section h2 { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--text); }
+.module-section h2::after { content:""; flex:1; border-block-start:1px solid var(--line); }
+.module-section h2 .category-icon { flex:none; color:var(--accent-text); }
+.module-section h2 .count { color:var(--muted); font-weight:500; font-variant-numeric:tabular-nums; order:1; }
+.page-icon { flex:none; inline-size:28px; block-size:28px; padding:4px; box-sizing:border-box; border-radius:8px; background:var(--accent-soft); color:var(--accent-text); }
 .module-title { display:flex; align-items:center; gap:8px; min-inline-size:0; }
 .module-icon { flex:none; inline-size:28px; block-size:28px; padding:4px; box-sizing:border-box; border-radius:8px; background:var(--accent-soft); color:var(--accent-text); }
 .module-tile.disabled .module-icon { background:var(--field); color:var(--muted); }

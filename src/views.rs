@@ -81,6 +81,36 @@ mod overview;
 mod permissions;
 mod settings;
 
+/// The path of a page's line icon, shared by the sidebar and the page heading.
+fn page_icon(key: &str) -> &'static str {
+    match key {
+        keys::OVERVIEW => "M4 11l8-7 8 7v9H4z",
+        keys::MODULES => "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
+        keys::SERVER_SETTINGS => {
+            "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 100 8 4 4 0 000-8z"
+        }
+        keys::HISTORY => "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
+        keys::PERMISSIONS => "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
+        _ => "",
+    }
+}
+
+/// A line icon, drawn in the current text colour.
+fn icon(path: &str, size: u8, class: &str) -> String {
+    format!(
+        "<svg class=\"{class}\" aria-hidden=\"true\" width=\"{size}\" height=\"{size}\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{path}\"/></svg>"
+    )
+}
+
+/// The heading of a page: its icon in front of its name.
+fn heading(l: Locale<'_>, key: &str) -> String {
+    format!(
+        "<h1 class=\"with-icon\">{}{}</h1>",
+        icon(page_icon(key), 20, "page-icon"),
+        l.text(key)
+    )
+}
+
 /// The fill of a role's dot: its Discord colour, or the text colour for a role that has none.
 fn role_fill(color: u64) -> String {
     if color == 0 {
@@ -123,28 +153,12 @@ pub(crate) fn shell(
     narrow: bool,
 ) -> String {
     let mut nav = String::new();
-    for (path, key, icon) in [
-        ("", keys::OVERVIEW, "M4 11l8-7 8 7v9H4z"),
-        (
-            "/modules",
-            keys::MODULES,
-            "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
-        ),
-        (
-            "/settings",
-            keys::SERVER_SETTINGS,
-            "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 100 8 4 4 0 000-8z",
-        ),
-        (
-            "/history",
-            keys::HISTORY,
-            "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
-        ),
-        (
-            "/permissions",
-            keys::PERMISSIONS,
-            "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
-        ),
+    for (path, key) in [
+        ("", keys::OVERVIEW),
+        ("/modules", keys::MODULES),
+        ("/settings", keys::SERVER_SETTINGS),
+        ("/history", keys::HISTORY),
+        ("/permissions", keys::PERMISSIONS),
     ] {
         let active = if key == current {
             " aria-current=\"page\""
@@ -153,8 +167,9 @@ pub(crate) fn shell(
         };
         let _ = write!(
             nav,
-            "<a href=\"/g/{}{path}\"{active}><svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"{icon}\"/></svg>{}</a>",
+            "<a href=\"/g/{}{path}\"{active}>{}{}</a>",
             escape(id),
+            icon(page_icon(key), 16, "nav-icon"),
             l.text(key)
         );
     }

@@ -18,8 +18,8 @@ pub(crate) fn overview(
     stats: Option<&Value>,
 ) -> String {
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1><div class=\"range\" role=\"group\" aria-label=\"{}\">",
-        l.text(keys::OVERVIEW),
+        "<header class=\"page-heading\">{}<div class=\"range\" role=\"group\" aria-label=\"{}\">",
+        super::heading(l, keys::OVERVIEW),
         l.text(keys::PERIOD)
     );
     for n in [7, 14, 30] {

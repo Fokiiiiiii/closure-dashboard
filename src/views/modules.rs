@@ -51,6 +51,18 @@ const CATEGORIES: [(&str, &[&str]); 3] = [
     ("system", &["diagnostics", "dashboard"]),
 ];
 
+/// The line icon of a category heading.
+fn category_icon(category: usize) -> &'static str {
+    match CATEGORIES.get(category).map(|(key, _)| *key) {
+        Some("moderation") => "M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z",
+        Some("community") => {
+            "M16 20v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1 M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z M20 20v-1a3 3 0 0 0-2-2.8 M16 4.2a3.5 3.5 0 0 1 0 6.6"
+        }
+        Some("system") => "M12 8a4 4 0 100 8 4 4 0 000-8z M12 3v3 M12 18v3 M3 12h3 M18 12h3",
+        _ => "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
+    }
+}
+
 fn module_tile(l: Locale<'_>, id: &str, module: &str, schema: &Value, effective: &Value) -> String {
     let enabled = effective["modules"][module]["enabled"]
         .as_bool()
@@ -105,8 +117,8 @@ pub(crate) fn modules_page(
     }
     tiles.sort_by_key(|(category, rank, _)| (*category, *rank));
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1></header>",
-        l.text(keys::MODULES)
+        "<header class=\"page-heading\">{}</header>",
+        super::heading(l, keys::MODULES)
     );
     for category in 0..=CATEGORIES.len() {
         let list: String = tiles
@@ -114,6 +126,7 @@ pub(crate) fn modules_page(
             .filter(|(c, _, _)| *c == category)
             .map(|(_, _, tile)| tile.as_str())
             .collect();
+        let count = tiles.iter().filter(|(c, _, _)| *c == category).count();
         if list.is_empty() {
             continue;
         }
@@ -125,7 +138,8 @@ pub(crate) fn modules_page(
         };
         let _ = write!(
             body,
-            "<section class=\"module-section\"><h2>{}</h2><ul class=\"module-grid\">{list}</ul></section>",
+            "<section class=\"module-section\"><h2>{}{}<span class=\"count\">{count}</span></h2><ul class=\"module-grid\">{list}</ul></section>",
+            super::icon(category_icon(category), 16, "category-icon"),
             l.text(heading)
         );
     }

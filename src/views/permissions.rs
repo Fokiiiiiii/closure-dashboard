@@ -37,8 +37,8 @@ pub(crate) fn permissions(
         }
     }
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1></header><section class=\"card panel permission-panel\"><h2>{}</h2>",
-        l.text(keys::PERMISSIONS),
+        "<header class=\"page-heading\">{}</header><section class=\"card panel permission-panel\"><h2>{}</h2>",
+        super::heading(l, keys::PERMISSIONS),
         l.text(keys::ROLES)
     );
     if rows.is_empty() {

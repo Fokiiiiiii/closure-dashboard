@@ -94,8 +94,8 @@ fn roles(
 pub(crate) fn settings_page(l: Locale<'_>, headers: &HeaderMap, data: &SettingsPage<'_>) -> String {
     let fields = form::settings(data.schema);
     let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1></header>",
-        l.text(keys::SERVER_SETTINGS)
+        "<header class=\"page-heading\">{}</header>",
+        super::heading(l, keys::SERVER_SETTINGS)
     );
     if data.saved {
         let _ = write!(
