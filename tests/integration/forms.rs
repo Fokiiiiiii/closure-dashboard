@@ -26,9 +26,9 @@ pub(super) fn bot_data(
             let path = if fake
                 .form_body
                 .as_ref()
-                .is_some_and(|b| b.get("log_webhook").is_some())
+                .is_some_and(|b| b.get("timezone").is_some() && b.get("modules").is_none())
             {
-                "log_webhook"
+                "timezone"
             } else {
                 "modules.welcome.config.channel"
             };
@@ -38,6 +38,7 @@ pub(super) fn bot_data(
     } else if path.ends_with("/config") {
         let mut config = fixture(include_str!("../fixtures/config-basic.json"));
         config["moderator_roles"] = json!([13, "99"]);
+        config["modules"]["moderation"]["config"]["timeout_role"] = json!("13");
         config
     } else if path.ends_with("/effective") {
         fixture(include_str!("../fixtures/api-eff.json"))
@@ -58,6 +59,24 @@ pub(super) fn bot_data(
         json!({})
     };
     (StatusCode::OK, [(header::ETAG, "\"1\"")], data.to_string())
+}
+
+#[tokio::test]
+async fn hidden_dependent_role_is_preserved() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let path = "/g/42/modules/moderation";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    assert!(page.contains("data-when=\"timeout_method=role\""));
+    assert!(page.contains("data-when=\"voice_mute_method=role\""));
+    assert!(!page.contains("name=\"f.timeout_method\" value=\"\""));
+    let result = response(&config, Method::POST, path,
+        "etag=%221%22&f.timeout_method=discord&f.timeout_role=&f.voice_mute_method=discord&f.voice_mute_role=").await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    let state = state.lock().unwrap();
+    let config = &state.form_body.as_ref().unwrap()["modules"]["moderation"]["config"];
+    assert_eq!(config["timeout_role"], "13");
+    assert!(config.get("voice_mute_role").is_none());
 }
 
 async fn response(
@@ -308,8 +327,11 @@ async fn server_settings_render_and_save() {
         "サーバー設定",
         "name=\"f.language\"",
         "type=\"radio\"",
-        "name=\"f.preset\"",
-        "value=\"small\"",
+        "name=\"f.prefix\"",
+        "name=\"f.timezone\"",
+        ">自動</label>",
+        ">日本語</label>",
+        ">English</label>",
         "name=\"f.log_channel\"",
         "name=\"f.moderator_roles\"",
         "不明なロール 99",
@@ -326,17 +348,28 @@ async fn server_settings_render_and_save() {
         ">managed</label>",
         "空で既定に戻ります",
         "class=\"muted mono\"",
+        "name=\"f.preset\"",
+        "name=\"f.log_webhook\"",
+        "name=\"f.success_emoji\"",
+        "name=\"f.error_emoji\"",
+        "settings-heading",
+        ">未設定</label>",
+        ">auto</label>",
+        ">ja</label>",
+        ">en</label>",
     ] {
         assert!(!page.contains(forbidden), "{forbidden}");
     }
-    let body = "etag=%221%22&f.language=ja&f.timezone=Asia%2FTokyo&f.prefix=%21&f.log_channel=11&roles_present=1&f.moderator_roles=13&f.moderator_roles=99&f.log_webhook=test";
+    assert_eq!(page.matches("name=\"f.language\"").count(), 3);
+    assert!(page.contains("title=\"&lt;script&gt;description&lt;/script&gt;\""));
+    let body = "etag=%221%22&f.language=ja&f.timezone=Asia%2FTokyo&f.prefix=%21&f.log_channel=11&roles_present=1&f.moderator_roles=13&f.moderator_roles=99";
     let result = response(&config, Method::POST, path, body).await;
     assert_eq!(result.status(), StatusCode::SEE_OTHER);
     assert_eq!(result.headers()[header::LOCATION], "/g/42/settings?saved=1");
     {
         let state = state.lock().unwrap();
         let body = state.form_body.as_ref().unwrap();
-        assert_eq!(*body, json!({"log_channel":"11","log_webhook":"test"}));
+        assert_eq!(*body, json!({"log_channel":"11"}));
         assert!(
             state
                 .queries
@@ -406,7 +439,7 @@ async fn server_settings_errors_and_security() {
     let (config, state) = setup().await;
     state.lock().unwrap().forms = true;
     let path = "/g/42/settings";
-    let body = "etag=%221%22&f.log_webhook=test&f.timezone=%3Cscript%3E";
+    let body = "etag=%221%22&f.timezone=%3Cscript%3E";
     state.lock().unwrap().form_put_status = Some(StatusCode::UNPROCESSABLE_ENTITY);
     let result = response(&config, Method::POST, path, body).await;
     assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);

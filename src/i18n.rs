@@ -40,13 +40,18 @@ pub mod keys {
         SETTINGS = "settings", NO_SETTINGS = "no-settings", SAVE = "save",
         DISCARD = "discard", SAVED = "saved", UNSET = "unset", FIELD_INVALID = "field-invalid",
         RELOAD = "reload", CONFLICT_RELOAD = "conflict-reload",
-        SERVER_SETTINGS = "server-settings", GENERAL = "general", TEXT_COMMANDS = "text-commands",
-        LOG_SETTINGS = "log-settings", DISPLAY = "display", UNKNOWN_ROLE = "unknown-role",
+        SERVER_SETTINGS = "server-settings", UNKNOWN_ROLE = "unknown-role",
         SETTINGS_LANGUAGE = "settings-language",
-        SETTINGS_TIMEZONE = "settings-timezone", SETTINGS_PRESET = "settings-preset",
+        SETTINGS_TIMEZONE = "settings-timezone",
         SETTINGS_PREFIX = "settings-prefix", SETTINGS_LOG_CHANNEL = "settings-log-channel",
-        SETTINGS_LOG_WEBHOOK = "settings-log-webhook", SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
-        SETTINGS_SUCCESS_EMOJI = "settings-success-emoji", SETTINGS_ERROR_EMOJI = "settings-error-emoji"
+        SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
+        LANG_AUTO = "lang-auto", LANG_JA = "lang-ja", LANG_EN = "lang-en",
+        HISTORY_ENABLED = "history-enabled", HISTORY_DISABLED = "history-disabled",
+        HISTORY_CONFIG = "history-config", HISTORY_ADD = "history-add", HISTORY_RESET = "history-reset",
+        HISTORY_LANGUAGE = "history-language", HISTORY_TIMEZONE = "history-timezone", HISTORY_PREFIX = "history-prefix",
+        HISTORY_LOG_CHANNEL = "history-log-channel", HISTORY_ROLES = "history-roles", HISTORY_PRESET = "history-preset",
+        HISTORY_WEBHOOK = "history-webhook", HISTORY_EMOJI = "history-emoji", HISTORY_PERMISSIONS = "history-permissions",
+        HISTORY_GENERIC = "history-generic"
     }
 }
 
@@ -253,6 +258,14 @@ impl<'a> Locale<'a> {
     pub fn with_text(self, key: &str, name: &str, value: &str) -> String {
         let mut args = FluentArgs::new();
         args.set(name, value);
+        self.format(key, Some(&args))
+    }
+    #[must_use]
+    pub fn with_texts(self, key: &str, values: &[(&str, &str)]) -> String {
+        let mut args = FluentArgs::new();
+        for (name, value) in values {
+            args.set(*name, *value);
+        }
         self.format(key, Some(&args))
     }
     fn format(self, key: &str, args: Option<&FluentArgs<'_>>) -> String {

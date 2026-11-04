@@ -97,6 +97,22 @@ mod overview;
 mod permissions;
 mod settings;
 
+fn first_sentence(description: &str) -> String {
+    let description = description.trim_start();
+    let end = description.find('。').map(|i| i + '。'.len_utf8());
+    let dot = description.find(". ").map(|i| i + 1);
+    let sentence = &description[..end
+        .into_iter()
+        .chain(dot)
+        .min()
+        .unwrap_or(description.len())];
+    if sentence.chars().count() > 80 {
+        format!("{}…", sentence.chars().take(80).collect::<String>())
+    } else {
+        sentence.to_owned()
+    }
+}
+
 pub(crate) use form::{FormPage, form_page};
 pub(crate) use history::history;
 pub(crate) use modules::modules_page;
@@ -167,6 +183,17 @@ pub(crate) fn shell(
 mod tests {
     use super::*;
     use crate::i18n::{Catalogs, REGISTRY};
+
+    #[test]
+    fn sentence_boundaries_and_length() {
+        assert_eq!(first_sentence("  一文。 次です。"), "一文。");
+        assert_eq!(first_sentence("  First. Second."), "First.");
+        assert_eq!(first_sentence("<script> hello"), "<script> hello");
+        assert_eq!(
+            first_sentence(&"あ".repeat(81)),
+            format!("{}…", "あ".repeat(80))
+        );
+    }
 
     #[test]
     fn card_pages_have_no_preference_controls() {

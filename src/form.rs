@@ -12,14 +12,10 @@ pub enum Kind {
 
 pub const SETTINGS: &[&str] = &[
     "language",
-    "timezone",
-    "preset",
-    "prefix",
     "log_channel",
-    "log_webhook",
     "moderator_roles",
-    "success_emoji",
-    "error_emoji",
+    "prefix",
+    "timezone",
 ];
 
 fn first_branch(schema: &Value, root: &Value) -> Value {
@@ -64,14 +60,18 @@ pub fn settings(schema: &Value) -> Vec<Field> {
             if *name == "log_channel" {
                 resolved["x-ui"]["widget"] = json!("channel");
             }
-            let kind = if *name == "moderator_roles" {
+            let kind = if *name == "language" {
+                Kind::Enum(vec!["auto".into(), "ja".into(), "en".into()])
+            } else if *name == "moderator_roles" {
                 Kind::Roles
             } else if let Some(values) = resolved["enum"].as_array() {
                 Kind::Enum(
                     values
                         .iter()
-                        .map(|v| v.as_str().map(str::to_owned))
-                        .collect::<Option<Vec<_>>>()?,
+                        .filter_map(Value::as_str)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_owned)
+                        .collect(),
                 )
             } else if resolved["type"] == "string" {
                 Kind::String
@@ -94,6 +94,18 @@ pub struct Field {
     pub label: String,
     pub kind: Kind,
     pub schema: Value,
+}
+
+#[must_use]
+pub fn dependency(module: &str, field: &str) -> Option<(&'static str, &'static str)> {
+    if module != "moderation" {
+        return None;
+    }
+    match field {
+        "timeout_role" => Some(("timeout_method", "role")),
+        "voice_mute_role" => Some(("voice_mute_method", "role")),
+        _ => None,
+    }
 }
 
 fn non_null(schema: &Value) -> Option<Value> {
@@ -154,8 +166,10 @@ pub fn fields(module: &Value) -> Vec<Field> {
                     Kind::Enum(
                         values
                             .iter()
-                            .map(|v| v.as_str().map(str::to_owned))
-                            .collect::<Option<Vec<_>>>()?,
+                            .filter_map(Value::as_str)
+                            .filter(|v| !v.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
                     )
                 } else {
                     Kind::String
@@ -405,10 +419,10 @@ mod tests {
     fn settings_schema_and_roles() {
         let schema = json!({"properties":{"language":{"anyOf":[{"type":"string","enum":["auto","en","ja"]},{"type":"string"},{"type":"null"}]},"preset":{"$ref":"#/$defs/Preset"},"moderator_roles":{"type":"array"},"log_channel":{"anyOf":[{"type":"string"},{"type":"integer"}]},"version":{"type":"string"}},"$defs":{"Preset":{"anyOf":[{"type":"string","enum":["small","medium","large"]},{"type":"object"}]}}});
         let fields = settings(&schema);
-        assert_eq!(fields.len(), 4);
+        assert_eq!(fields.len(), 3);
         assert_eq!(
             fields[0].kind,
-            Kind::Enum(vec!["auto".into(), "en".into(), "ja".into()])
+            Kind::Enum(vec!["auto".into(), "ja".into(), "en".into()])
         );
         let roles = fields.iter().find(|f| f.name == "moderator_roles").unwrap();
         assert_eq!(parse(roles, "1,+2"), Some(json!(["1", "+2"])));
@@ -436,11 +450,12 @@ mod tests {
             "flag":{"anyOf":[{"type":"null"},{"type":"boolean","description":"welcome-flag"}]},
             "count":{"type":"integer","minimum":1,"maximum":3},
             "name":{"type":["string","null"],"pattern":"^[0-9]{1,3}$","maxLength":3},
-            "choice":{"type":"string","enum":["a","b"]},"skip":{"type":"array"}
+            "choice":{"type":"string","enum":["a",null,"", "b"]},"skip":{"type":"array"}
         }}]}}});
         let f = fields(&module);
         assert_eq!(f.len(), 4);
         let get = |name: &str| f.iter().find(|f| f.name == name).unwrap();
+        assert_eq!(get("choice").kind, Kind::Enum(vec!["a".into(), "b".into()]));
         assert_eq!(get("flag").label, "flag");
         assert_eq!(parse(get("flag"), "false"), Some(json!(false)));
         assert_eq!(parse(get("count"), "2"), Some(json!(2)));

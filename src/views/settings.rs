@@ -118,99 +118,69 @@ pub(crate) fn settings_page(l: Locale<'_>, headers: &HeaderMap, data: &SettingsP
         escape(data.id),
         escape(data.etag)
     );
-    let groups: &[(&str, &[(&str, &str)])] = &[
-        (
-            keys::GENERAL,
-            &[
-                ("language", keys::SETTINGS_LANGUAGE),
-                ("timezone", keys::SETTINGS_TIMEZONE),
-                ("preset", keys::SETTINGS_PRESET),
-            ],
-        ),
-        (keys::TEXT_COMMANDS, &[("prefix", keys::SETTINGS_PREFIX)]),
-        (
-            keys::LOG_SETTINGS,
-            &[
-                ("log_channel", keys::SETTINGS_LOG_CHANNEL),
-                ("log_webhook", keys::SETTINGS_LOG_WEBHOOK),
-            ],
-        ),
-        (
-            keys::PERMISSIONS,
-            &[("moderator_roles", keys::SETTINGS_MODERATOR_ROLES)],
-        ),
-        (
-            keys::DISPLAY,
-            &[
-                ("success_emoji", keys::SETTINGS_SUCCESS_EMOJI),
-                ("error_emoji", keys::SETTINGS_ERROR_EMOJI),
-            ],
-        ),
+    let names = &[
+        ("language", keys::SETTINGS_LANGUAGE),
+        ("log_channel", keys::SETTINGS_LOG_CHANNEL),
+        ("moderator_roles", keys::SETTINGS_MODERATOR_ROLES),
+        ("prefix", keys::SETTINGS_PREFIX),
+        ("timezone", keys::SETTINGS_TIMEZONE),
     ];
-    for (group, names) in groups {
-        let _ = write!(
-            body,
-            "<section class=\"card settings-card\"><h2 class=\"settings-heading\">{}</h2>",
-            l.text(group)
-        );
-        for (name, label) in *names {
-            let Some((index, field)) = fields.iter().enumerate().find(|(_, f)| f.name == *name)
-            else {
-                continue;
-            };
-            let fallback = data
-                .stored
-                .get(*name)
-                .filter(|v| !v.is_null())
-                .or_else(|| data.effective.get(*name))
-                .map_or_else(String::new, display);
-            let value = data.input.get(*name).unwrap_or(&fallback);
-            let errors = data.errors.get(*name);
-            let heading = if field.kind == Kind::Roles && data.directory.is_some() {
-                format!("<span id=\"field-{index}-label\">{}</span>", l.text(label))
-            } else {
-                format!("<label for=\"field-{index}\">{}</label>", l.text(label))
-            };
-            let _ = write!(body, "<div class=\"settings-row\"><div>{heading}");
-            if !name.ends_with("_emoji")
-                && let Some(description) = field.schema["description"].as_str()
-            {
-                let _ = write!(
-                    body,
-                    "<p class=\"settings-help\">{}</p>",
-                    escape(description)
-                );
-            }
-            if let Some(messages) = errors {
-                let _ = write!(
-                    body,
-                    "<div id=\"field-{index}-error\" class=\"form-error\" role=\"alert\">"
-                );
-                for message in messages {
-                    let _ = write!(body, "<div>⚠ {}</div>", escape(message));
-                }
-                body.push_str("</div>");
-            }
-            let widget = if field.kind == Kind::Roles {
-                roles(
-                    l,
-                    data.id,
-                    field,
-                    index,
-                    value,
-                    data.directory,
-                    errors.is_some(),
-                )
-            } else {
-                control(l, field, index, value, data.directory, errors.is_some())
-            };
+    body.push_str("<section class=\"card settings-card\">");
+    for (name, label) in names {
+        let Some((index, field)) = fields.iter().enumerate().find(|(_, f)| f.name == *name) else {
+            continue;
+        };
+        let fallback = data
+            .stored
+            .get(*name)
+            .filter(|v| !v.is_null())
+            .or_else(|| data.effective.get(*name))
+            .map_or_else(String::new, display);
+        let value = data.input.get(*name).unwrap_or(&fallback);
+        let errors = data.errors.get(*name);
+        let heading = if field.kind == Kind::Roles && data.directory.is_some() {
+            format!("<span id=\"field-{index}-label\">{}</span>", l.text(label))
+        } else {
+            format!("<label for=\"field-{index}\">{}</label>", l.text(label))
+        };
+        let _ = write!(body, "<div class=\"settings-row\"><div>{heading}");
+        if let Some(description) = field.schema["description"].as_str() {
             let _ = write!(
                 body,
-                "</div><div class=\"settings-control\">{widget}</div></div>"
+                "<p class=\"settings-help\" title=\"{}\">{}</p>",
+                escape(description),
+                escape(&super::first_sentence(description))
             );
         }
-        body.push_str("</section>");
+        if let Some(messages) = errors {
+            let _ = write!(
+                body,
+                "<div id=\"field-{index}-error\" class=\"form-error\" role=\"alert\">"
+            );
+            for message in messages {
+                let _ = write!(body, "<div>⚠ {}</div>", escape(message));
+            }
+            body.push_str("</div>");
+        }
+        let widget = if field.kind == Kind::Roles {
+            roles(
+                l,
+                data.id,
+                field,
+                index,
+                value,
+                data.directory,
+                errors.is_some(),
+            )
+        } else {
+            control(l, field, index, value, data.directory, errors.is_some())
+        };
+        let _ = write!(
+            body,
+            "</div><div class=\"settings-control\">{widget}</div></div>"
+        );
     }
+    body.push_str("</section>");
     let _ = write!(
         body,
         "<div class=\"save-bar\"><a class=\"button ghost\" href=\"/g/{}/settings\">{}</a><button class=\"button primary\" type=\"submit\">{}</button></div></form>",

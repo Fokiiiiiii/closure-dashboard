@@ -221,6 +221,18 @@ pub(super) async fn save(
         let Some(value) = input.get(&field.name) else {
             continue;
         };
+        if let Some((name, expected)) = form::dependency(&module, &field.name) {
+            let selected = input.get(name).map(String::as_str).or_else(|| {
+                data.stored["modules"][&module]["config"]
+                    .get(name)
+                    .filter(|v| !v.is_null())
+                    .or_else(|| data.effective["modules"][&module]["config"].get(name))
+                    .and_then(Value::as_str)
+            });
+            if selected != Some(expected) {
+                continue;
+            }
+        }
         let Some(value) = form::parse(field, value) else {
             errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
             continue;

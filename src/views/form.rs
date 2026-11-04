@@ -103,19 +103,8 @@ pub(super) fn control(
             field.schema["maximum"],
             escape(value)
         ),
-        Kind::Enum(values)
-            if !(field.name == "preset" && field.schema["x-ui"]["server_settings"] == true)
-                && (2..=3).contains(&values.len()) =>
-        {
+        Kind::Enum(values) if (2..=3).contains(&values.len()) => {
             let mut result = String::from("<div class=\"form-segments\">");
-            if field.name == "language" && field.schema["x-ui"]["server_settings"] == true {
-                let _ = write!(
-                    result,
-                    "<input type=\"radio\" id=\"{id}-unset\" name=\"{name}\" value=\"\"{}><label for=\"{id}-unset\">{}</label>",
-                    if value.is_empty() { " checked" } else { "" },
-                    l.text(keys::UNSET)
-                );
-            }
             for (i, v) in values.iter().enumerate() {
                 let radio_id = if i == 0 {
                     id.clone()
@@ -132,7 +121,16 @@ pub(super) fn control(
                     } else {
                         ""
                     },
-                    escape(v)
+                    if field.name == "language" && field.schema["x-ui"]["server_settings"] == true {
+                        match v.as_str() {
+                            "auto" => l.text(keys::LANG_AUTO),
+                            "ja" => l.text(keys::LANG_JA),
+                            "en" => l.text(keys::LANG_EN),
+                            _ => escape(v),
+                        }
+                    } else {
+                        escape(v)
+                    }
                 );
             }
             result.push_str("</div>");
@@ -140,7 +138,6 @@ pub(super) fn control(
         }
         Kind::Enum(values) => {
             let mut result = format!("<select {attrs}>");
-            option(&mut result, "", &l.text(keys::UNSET), value.is_empty());
             for v in values {
                 option(&mut result, v, v, v == value);
             }
@@ -216,6 +213,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
     for (index, field) in fields.iter().enumerate() {
         let fallback = stored["modules"][module]["config"]
             .get(&field.name)
+            .filter(|v| !v.is_null())
             .or_else(|| effective["modules"][module]["config"].get(&field.name))
             .unwrap_or(&Value::Null);
         let fallback = match fallback {
@@ -225,10 +223,15 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         };
         let value = input.get(&field.name).unwrap_or(&fallback);
         let field_errors = errors.get(&field.name);
+        let when = form::dependency(module, &field.name)
+            .map_or_else(String::new, |(name, value)| {
+                format!(" when\" data-when=\"{}={}", escape(name), escape(value))
+            });
         let _ = write!(
             body,
-            "<div class=\"settings-row\"><div><label for=\"field-{index}\">{}</label>",
-            escape(&field.label)
+            "<div class=\"settings-row{when}\"><div><label for=\"field-{index}\" title=\"{}\">{}</label>",
+            escape(field.schema["description"].as_str().unwrap_or(&field.label)),
+            escape(&super::first_sentence(&field.label))
         );
         if let Some(messages) = field_errors {
             let _ = write!(

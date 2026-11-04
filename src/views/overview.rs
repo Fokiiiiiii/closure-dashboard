@@ -67,8 +67,6 @@ pub(crate) fn overview(
                 .map_or_else(|| "—".into(), group_digits),
             net,
         ),
-        (keys::JOINS, group_digits(joins), String::new()),
-        (keys::LEAVES, group_digits(leaves), String::new()),
         (keys::MESSAGES, group_digits(message_total), String::new()),
         (
             keys::MODERATION,
@@ -207,6 +205,10 @@ mod tests {
             Some(&data),
         );
         assert!(!html.contains("+0"));
+        assert_eq!(html.matches("class=\"card stat\"").count(), 3);
+        assert!(!html.contains("<div class=\"card stat\"><div>参加</div>"));
+        assert!(!html.contains("<div class=\"card stat\"><div>脱退</div>"));
+        assert!(html.contains("参加") && html.contains("脱退"));
         for forbidden in [
             "chart-note",
             "chart-empty",

@@ -363,12 +363,7 @@ async fn history_and_permissions_render() {
     for (path, expected) in [
         (
             "/g/42/history",
-            vec![
-                "modules.channels.enabled",
-                "false → true",
-                "初期設定",
-                "&lt;script&gt;",
-            ],
+            vec!["channels を有効にしました", "初期設定", "&lt;script&gt;"],
         ),
         ("/g/42/permissions", vec!["ロールの割り当てはありません"]),
     ] {

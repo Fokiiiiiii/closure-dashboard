@@ -56,11 +56,12 @@ pub(crate) fn modules_page(
         };
         let _ = write!(
             body,
-            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-name\">{}</span>{}</div><p class=\"muted module-description\">{}</p>{action}</li>",
+            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-name\">{}</span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
             if enabled { "enabled" } else { "disabled" },
             escape(title),
             toggle(l, id, &module, enabled),
-            escape(description)
+            escape(description),
+            escape(&super::first_sentence(description))
         );
     }
     body.push_str("</ul>");

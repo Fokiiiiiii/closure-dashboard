@@ -8,8 +8,6 @@
   --shadow:0 1px 2px rgba(0,0,0,.04); --shadow-float:0 12px 32px rgba(0,0,0,.12);
   --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100; --series-5:#e87ba4;
 }
-.settings-card + .settings-card { margin-block-start:16px; }
-.settings-heading { margin:0; padding:16px 20px; border-block-end:1px solid var(--line); font-size:1rem; }
 .settings-help { color:var(--muted); font-size:.85rem; line-height:1.5; overflow-wrap:anywhere; margin-block:6px 0; }
 .role-list { display:grid; gap:8px; max-block-size:240px; overflow:auto; }
 .role-option { display:flex; align-items:center; gap:8px; overflow-wrap:anywhere; }
@@ -86,6 +84,8 @@ nav a[aria-current=page] { font-weight:600; }
 .settings-card { overflow:hidden; margin-block-end:80px; }
 .settings-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,240px); gap:16px; align-items:center; padding:14px 16px; }
 .settings-row + .settings-row { border-block-start:1px solid var(--line); }
+form:not(:has(input[name="f.timeout_method"][value="role"]:checked)) .when[data-when="timeout_method=role"],
+form:not(:has(input[name="f.voice_mute_method"][value="role"]:checked)) .when[data-when="voice_mute_method=role"] { display:none; }
 .settings-control { display:flex; justify-content:flex-end; min-inline-size:0; }
 .settings-control input:not(.switch),.settings-control select { min-inline-size:0; max-inline-size:100%; block-size:32px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text); font:inherit; padding-inline:10px; }
 .settings-control input[type=checkbox].switch { appearance:none; flex:none; cursor:pointer; }
@@ -173,3 +173,6 @@ td { overflow-wrap:anywhere; }
   *,*::before,*::after { transition:none !important; }
   button:active,.button:active { transform:none; }
 }
+
+/* Revision numbers, times and ids stay on one line; the text column is the one that wraps. */
+.table-scroll th:first-child, .table-scroll td:first-child, .table-scroll th:last-child, .table-scroll td:last-child, .mono { white-space: nowrap; }
