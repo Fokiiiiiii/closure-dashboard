@@ -44,6 +44,39 @@ pub(super) fn module_icon(module: &str) -> String {
     )
 }
 
+/// The categories of the list, in the order shown, with the modules each one holds.
+const CATEGORIES: [(&str, &[&str]); 3] = [
+    ("moderation", &["moderation", "automod", "logs"]),
+    ("community", &["welcome", "channels", "tags", "remind"]),
+    ("system", &["diagnostics", "dashboard"]),
+];
+
+fn module_tile(l: Locale<'_>, id: &str, module: &str, schema: &Value, effective: &Value) -> String {
+    let enabled = effective["modules"][module]["enabled"]
+        .as_bool()
+        .unwrap_or(false);
+    let description = schema["description"].as_str().unwrap_or("");
+    let action = if form::fields(schema).is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
+            escape(id),
+            escape(module),
+            l.text(keys::SETTINGS)
+        )
+    };
+    format!(
+        "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
+        if enabled { "enabled" } else { "disabled" },
+        module_icon(module),
+        escape(module),
+        toggle(l, id, module, enabled),
+        escape(description),
+        escape(&super::first_sentence(description))
+    )
+}
+
 pub(crate) fn modules_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -52,41 +85,50 @@ pub(crate) fn modules_page(
     schema: &Value,
     effective: &Value,
 ) -> String {
-    let mut body = format!(
-        "<header class=\"page-heading\"><h1>{}</h1></header><ul class=\"module-grid\">",
-        l.text(keys::MODULES)
-    );
+    let mut tiles: Vec<(usize, usize, String)> = Vec::new();
     for (module, schema) in form::modules(schema) {
         if !crate::routes::valid_module(&module) {
             continue;
         }
-        let enabled = effective["modules"][&module]["enabled"]
-            .as_bool()
-            .unwrap_or(false);
-        let description = schema["description"].as_str().unwrap_or("");
-        let title = module.as_str();
-        let action = if form::fields(&schema).is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
-                escape(id),
-                escape(&module),
-                l.text(keys::SETTINGS)
-            )
+        let place = CATEGORIES.iter().enumerate().find_map(|(c, (_, members))| {
+            members
+                .iter()
+                .position(|m| *m == module)
+                .map(|rank| (c, rank))
+        });
+        let (category, rank) = place.unwrap_or((CATEGORIES.len(), 0));
+        tiles.push((
+            category,
+            rank,
+            module_tile(l, id, &module, &schema, effective),
+        ));
+    }
+    tiles.sort_by_key(|(category, rank, _)| (*category, *rank));
+    let mut body = format!(
+        "<header class=\"page-heading\"><h1>{}</h1></header>",
+        l.text(keys::MODULES)
+    );
+    for category in 0..=CATEGORIES.len() {
+        let list: String = tiles
+            .iter()
+            .filter(|(c, _, _)| *c == category)
+            .map(|(_, _, tile)| tile.as_str())
+            .collect();
+        if list.is_empty() {
+            continue;
+        }
+        let heading = match CATEGORIES.get(category).map(|(key, _)| *key) {
+            Some("moderation") => keys::CAT_MODERATION,
+            Some("community") => keys::CAT_COMMUNITY,
+            Some("system") => keys::CAT_SYSTEM,
+            _ => keys::CAT_OTHER,
         };
         let _ = write!(
             body,
-            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
-            if enabled { "enabled" } else { "disabled" },
-            module_icon(&module),
-            escape(title),
-            toggle(l, id, &module, enabled),
-            escape(description),
-            escape(&super::first_sentence(description))
+            "<section class=\"module-section\"><h2>{}</h2><ul class=\"module-grid\">{list}</ul></section>",
+            l.text(heading)
         );
     }
-    body.push_str("</ul>");
     shell(l, headers, id, name, keys::MODULES, &body, false)
 }
 
@@ -95,6 +137,45 @@ mod tests {
     use super::*;
     use crate::i18n::{Catalogs, REGISTRY};
     use serde_json::json;
+
+    #[test]
+    fn modules_are_listed_by_category_in_a_fixed_order() {
+        let catalogs = Catalogs::new(REGISTRY).unwrap();
+        let schema = json!({"properties":{"modules":{"properties":{
+            "zeta":{"description":"z"},
+            "remind":{"description":"r"},
+            "logs":{"description":"l"},
+            "automod":{"description":"a"},
+            "diagnostics":{"description":"d"}
+        }}}});
+        let html = modules_page(
+            catalogs.locale("en"),
+            &HeaderMap::new(),
+            "42",
+            "server",
+            &schema,
+            &json!({}),
+        );
+        let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at(">Moderation<") < at("modules/automod/toggle"));
+        assert!(at("modules/automod/toggle") < at("modules/logs/toggle"));
+        assert!(at("modules/logs/toggle") < at(">Community<"));
+        assert!(at(">Community<") < at("modules/remind/toggle"));
+        assert!(at("modules/remind/toggle") < at(">System<"));
+        assert!(at(">System<") < at("modules/diagnostics/toggle"));
+        assert!(at("modules/diagnostics/toggle") < at(">Other<"));
+        assert!(at(">Other<") < at("modules/zeta/toggle"));
+        let one = json!({"properties":{"modules":{"properties":{"remind":{}}}}});
+        let html = modules_page(
+            catalogs.locale("en"),
+            &HeaderMap::new(),
+            "42",
+            "server",
+            &one,
+            &json!({}),
+        );
+        assert!(!html.contains(">Moderation<") && !html.contains(">Other<"));
+    }
 
     #[test]
     fn every_known_module_has_its_own_icon_and_unknown_ones_a_plain_box() {

@@ -96,6 +96,33 @@ pub struct Field {
     pub schema: Value,
 }
 
+/// Where a part comes in the page: the order the cards are shown in.
+#[must_use]
+pub fn section_rank(section: &str) -> usize {
+    match section {
+        "warn" | "behavior" | "destination" => 0,
+        "timeout" | "events" => 1,
+        "voice" => 2,
+        "ban" => 3,
+        _ => 9,
+    }
+}
+
+/// The part of a big module a field belongs to; the settings page shows one card per part.
+#[must_use]
+pub fn section(module: &str, field: &str) -> &'static str {
+    match (module, field) {
+        ("moderation", "warn_expire_days" | "require_reason" | "dm_on_action") => "warn",
+        ("moderation", "timeout_method" | "timeout_role") => "timeout",
+        ("moderation", "voice_mute_method" | "voice_mute_role") => "voice",
+        ("moderation", "ban_delete_days") => "ban",
+        ("automod", "dry_run" | "dm_on_action" | "warn_expire_days") => "behavior",
+        ("logs", "channel" | "webhook") => "destination",
+        ("logs", _) => "events",
+        _ => "other",
+    }
+}
+
 #[must_use]
 pub fn dependency(module: &str, field: &str) -> Option<(&'static str, &'static str)> {
     if module != "moderation" {
@@ -415,6 +442,25 @@ pub fn update<S: std::hash::BuildHasher>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fields_of_a_big_module_fall_into_their_parts() {
+        assert_eq!(section("moderation", "timeout_role"), "timeout");
+        assert_eq!(section("moderation", "ban_delete_days"), "ban");
+        assert_eq!(section("moderation", "require_reason"), "warn");
+        assert_eq!(section("logs", "channel"), "destination");
+        assert_eq!(section("logs", "member_joins"), "events");
+        assert_eq!(section("automod", "dry_run"), "behavior");
+        assert_eq!(section("welcome", "channel"), "other");
+        assert_eq!(section("unknown", "anything"), "other");
+    }
+
+    #[test]
+    fn cards_come_in_a_fixed_order() {
+        let mut parts = ["ban", "voice", "other", "timeout", "warn"];
+        parts.sort_by_key(|p| section_rank(p));
+        assert_eq!(parts, ["warn", "timeout", "voice", "ban", "other"]);
+    }
     #[test]
     fn settings_schema_and_roles() {
         let schema = json!({"properties":{"language":{"anyOf":[{"type":"string","enum":["auto","en","ja"]},{"type":"string"},{"type":"null"}]},"preset":{"$ref":"#/$defs/Preset"},"moderator_roles":{"type":"array"},"log_channel":{"anyOf":[{"type":"string"},{"type":"integer"}]},"version":{"type":"string"}},"$defs":{"Preset":{"anyOf":[{"type":"string","enum":["small","medium","large"]},{"type":"object"}]}}});

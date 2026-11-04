@@ -46,6 +46,7 @@ pub mod keys {
         SETTINGS_PREFIX = "settings-prefix", SETTINGS_LOG_CHANNEL = "settings-log-channel",
         SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
         LANG_AUTO = "lang-auto", LANG_JA = "lang-ja", LANG_EN = "lang-en",
+        CAT_MODERATION = "cat-moderation", CAT_COMMUNITY = "cat-community", CAT_SYSTEM = "cat-system", CAT_OTHER = "cat-other", SEC_WARN = "sec-warn", SEC_TIMEOUT = "sec-timeout", SEC_VOICE = "sec-voice", SEC_BAN = "sec-ban", SEC_BEHAVIOR = "sec-behavior", SEC_DESTINATION = "sec-destination", SEC_EVENTS = "sec-events",
         OPT_DISCORD = "opt-discord", OPT_ROLE = "opt-role", OPT_PRIVATE = "opt-private", OPT_PUBLIC = "opt-public",
         HISTORY_ENABLED = "history-enabled", HISTORY_DISABLED = "history-disabled",
         HISTORY_CONFIG = "history-config", HISTORY_ADD = "history-add", HISTORY_RESET = "history-reset",
