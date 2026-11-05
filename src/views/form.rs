@@ -256,6 +256,12 @@ pub(crate) fn part_tabs(
     out
 }
 
+/// The caption of a field: the dashboard's own when it has one, else the bot's description.
+fn field_label(l: Locale<'_>, field: &Field) -> String {
+    l.find(&format!("ed-f-{}", field.name.replace('.', "_")))
+        .unwrap_or_else(|| escape(&super::first_sentence(&field.label)))
+}
+
 /// A message setting in the form: what it says now, and the way to the composer.
 fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &Value) -> String {
     let excerpt = match current {
@@ -635,7 +641,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 body,
                 "<div class=\"settings-row{wide}{when}\"><div><label for=\"field-{index}\" title=\"{}\">{}</label>",
                 escape(field.schema["description"].as_str().unwrap_or(&field.label)),
-                escape(&super::first_sentence(&field.label))
+                field_label(l, field)
             );
             if let Some(messages) = field_errors {
                 let _ = write!(

@@ -239,7 +239,10 @@ async fn setting_view(
     }
     let part = form::part_of(module, field);
     let back = views::part_path(id, module, part);
-    let title = format!("{} › {}", views::part_name(l, module, part), escape(field));
+    let label = l
+        .find(&format!("ed-f-{}", field.replace('.', "_")))
+        .unwrap_or_else(|| escape(field));
+    let title = format!("{} › {label}", views::part_name(l, module, part));
     let side = views::ComposerSide::Setting {
         variables: &variables,
     };

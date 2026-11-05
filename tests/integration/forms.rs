@@ -12,7 +12,7 @@ pub(super) fn bot_data(
         if fake.structured {
             schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"]["properties"]["config"]
                 ["anyOf"][0]["properties"]["message"] = json!({
-                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "anyOf": [{"type": "string", "x-ui": {"widget": "textarea"}}, {"type": "object"}, {"type": "null"}],
                 "x-ui": {"widget": "message", "variables": ["user", "server"]}
             });
             let mut parts = fixture(include_str!("../fixtures/automod-structured.json"));

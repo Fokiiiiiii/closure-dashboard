@@ -130,7 +130,11 @@ fn module_tiles(
         .as_bool()
         .unwrap_or(false);
     let fields = form::fields(schema);
-    let parts = form::parts(module, &fields);
+    // The replies and texts of a module are advanced settings: a tab of the module, no tile.
+    let parts: Vec<&str> = form::parts(module, &fields)
+        .into_iter()
+        .filter(|part| *part != "texts")
+        .collect();
     let mut tiles = Vec::new();
     for n in 0..parts.len().max(1) {
         let part = parts.get(n).copied().unwrap_or("");

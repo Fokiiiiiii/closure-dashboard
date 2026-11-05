@@ -247,6 +247,12 @@ pub fn dependency(module: &str, field: &str) -> Option<(&'static str, &'static s
 }
 
 fn non_null(schema: &Value) -> Option<Value> {
+    // A message may be a text or an object; the composer reads it whichever it is.
+    if schema["x-ui"]["widget"] == "message" {
+        let mut message = schema.clone();
+        message.as_object_mut()?.remove("anyOf");
+        return Some(message);
+    }
     let Some(alternatives) = schema.get("anyOf").and_then(Value::as_array) else {
         return Some(schema.clone());
     };
