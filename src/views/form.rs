@@ -41,6 +41,7 @@ fn section_title(l: Locale<'_>, key: &str) -> String {
         "ban" => keys::SEC_BAN,
         "auto_delete" => keys::SEC_AUTO_DELETE,
         "auto_react" => keys::SEC_AUTO_REACT,
+        "escalation" => keys::SEC_ESCALATION,
         "behavior" => keys::SEC_BEHAVIOR,
         "destination" => keys::SEC_DESTINATION,
         "events" => keys::SEC_EVENTS,
@@ -56,6 +57,9 @@ fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
         "auto" if server_language => keys::LANG_AUTO,
         "ja" if server_language => keys::LANG_JA,
         "en" if server_language => keys::LANG_EN,
+        "timeout" => keys::OPT_TIMEOUT,
+        "kick" => keys::OPT_KICK,
+        "ban" => keys::OPT_BAN,
         "discord" => keys::OPT_DISCORD,
         "role" => keys::OPT_ROLE,
         "private" => keys::OPT_PRIVATE,
@@ -213,6 +217,9 @@ fn column_title(l: Locale<'_>, name: &str) -> String {
         "skip_pinned" => keys::COL_SKIP_PINNED,
         "emojis" => keys::COL_EMOJIS,
         "skip_bots" => keys::COL_SKIP_BOTS,
+        "warns" => keys::COL_WARNS,
+        "action" => keys::COL_ACTION,
+        "duration" => keys::COL_DURATION,
         _ => return escape(name),
     })
 }
@@ -285,14 +292,15 @@ fn list_editor(
             || columns
                 .iter()
                 .zip(texts)
-                .any(|(c, text)| c.kind != Kind::Boolean && !text.is_empty())
+                .any(|(c, text)| !form::is_preset(&c.kind) && !text.is_empty())
     });
     let existing = rows.len();
     if (rows.len() as u64) < field.schema["maxItems"].as_u64().unwrap_or(25) {
         let blank = columns
             .iter()
-            .map(|c| match c.kind {
+            .map(|c| match &c.kind {
                 Kind::Boolean => c.schema["default"].as_bool().unwrap_or(false).to_string(),
+                Kind::Enum(values) => values.first().cloned().unwrap_or_default(),
                 _ => String::new(),
             })
             .collect();

@@ -116,6 +116,7 @@ pub fn section_rank(section: &str) -> usize {
         "timeout" | "events" | "auto_react" => 1,
         "voice" => 2,
         "ban" => 3,
+        "escalation" => 4,
         _ => 9,
     }
 }
@@ -133,6 +134,7 @@ pub fn section(module: &str, field: &str) -> &'static str {
         ("logs", _) => "events",
         ("channels", "auto_delete") => "auto_delete",
         ("channels", "auto_react") => "auto_react",
+        ("moderation", "escalation") => "escalation",
         _ => "other",
     }
 }
@@ -202,7 +204,22 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
             let schema = non_null(&properties[name])?;
             let kind = match schema["type"].as_str()? {
                 "boolean" => Kind::Boolean,
-                "string" => Kind::String,
+                "integer"
+                    if schema["minimum"].as_i64().is_some()
+                        && schema["maximum"].as_i64().is_some() =>
+                {
+                    Kind::Integer
+                }
+                "string" => match schema["enum"].as_array() {
+                    Some(values) => Kind::Enum(
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                    ),
+                    None => Kind::String,
+                },
                 "array" if schema["items"]["type"] == "string" => Kind::Words,
                 _ => return None,
             };
@@ -431,6 +448,12 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
     }
 }
 
+/// A kind whose cell always has a value to start with, so that it does not make a row worth keeping.
+#[must_use]
+pub fn is_preset(kind: &Kind) -> bool {
+    matches!(kind, Kind::Boolean | Kind::Enum(_))
+}
+
 /// The rows of a list field, read from the inputs named `<field>.<row>.<column>`.
 /// A row ticked for removal or left empty is dropped; `None` when a row cannot be read.
 #[must_use]
@@ -472,7 +495,7 @@ pub fn rows<S: std::hash::BuildHasher>(
         }
         if !columns
             .iter()
-            .any(|c| c.kind != Kind::Boolean && row.contains_key(&c.name))
+            .any(|c| !is_preset(&c.kind) && row.contains_key(&c.name))
         {
             continue;
         }
@@ -662,6 +685,49 @@ mod tests {
                 ("auto_delete.0.emojis", " a , b ,"),
             ]),
             Some(json!([{"channel": "10", "after": "1h", "emojis": ["a", "b"]}]))
+        );
+    }
+
+    #[test]
+    fn a_list_takes_numbers_and_choices_and_ignores_a_row_with_only_a_preset_choice() {
+        let module = json!({"properties": {"config": {"properties": {"escalation": {
+            "type": "array", "items": {"type": "object", "required": ["warns", "action"],
+            "properties": {
+                "warns": {"type": "integer", "minimum": 1, "maximum": 100},
+                "action": {"type": "string", "enum": ["timeout", "kick", "ban"]},
+                "duration": {"type": "string"}
+            }}
+        }}}}});
+        let all = fields(&module);
+        let Kind::List(columns) = &all[0].kind else {
+            panic!("not a list");
+        };
+        assert_eq!(columns[0].kind, Kind::Integer);
+        assert!(matches!(&columns[1].kind, Kind::Enum(v) if v.len() == 3));
+        let read = |pairs: &[(&str, &str)]| {
+            let input: HashMap<String, String> = pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            rows(&all[0], columns, &input)
+        };
+        assert_eq!(
+            read(&[("escalation.0.warns", "3"), ("escalation.0.action", "kick")]),
+            Some(json!([{"warns": 3, "action": "kick"}]))
+        );
+        assert_eq!(
+            read(&[
+                ("escalation.0.warns", ""),
+                ("escalation.0.action", "timeout")
+            ]),
+            Some(json!([]))
+        );
+        assert_eq!(
+            read(&[
+                ("escalation.0.warns", "101"),
+                ("escalation.0.action", "ban")
+            ]),
+            None
         );
     }
 
