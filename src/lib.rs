@@ -2,6 +2,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod closure_api;
+pub mod composer;
 pub mod config;
 pub mod editor;
 pub mod form;

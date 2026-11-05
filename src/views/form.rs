@@ -201,7 +201,7 @@ pub(super) fn control(
                 escape(value)
             )
         }
-        Kind::List(_) | Kind::Entries | Kind::Structured => String::new(),
+        Kind::List(_) | Kind::Entries | Kind::Structured | Kind::Message(_) => String::new(),
         Kind::String | Kind::Roles | Kind::Words | Kind::FlagOrRoles => {
             let pattern = field.schema["pattern"]
                 .as_str()
@@ -254,6 +254,34 @@ pub(crate) fn part_tabs(
     }
     out.push_str("</nav>");
     out
+}
+
+/// A message setting in the form: what it says now, and the way to the composer.
+fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &Value) -> String {
+    let excerpt = match current {
+        Value::String(text) => text.clone(),
+        Value::Object(_) => current["content"]
+            .as_str()
+            .or_else(|| current["embeds"][0]["title"].as_str())
+            .or_else(|| current["embeds"][0]["description"].as_str())
+            .unwrap_or("")
+            .to_owned(),
+        _ => String::new(),
+    };
+    let rich = current["embeds"].as_array().is_some_and(|e| !e.is_empty());
+    let shown: String = excerpt.chars().take(80).collect();
+    let summary = if shown.is_empty() && !rich {
+        l.text(keys::CP_DEFAULT_MESSAGE)
+    } else {
+        format!("{}{}", if rich { "▣ " } else { "" }, escape(&shown))
+    };
+    format!(
+        "<div class=\"cp-summary\"><span class=\"muted\">{summary}</span><a class=\"button secondary\" href=\"/g/{}/modules/{}/compose/{}\">{}</a></div>",
+        escape(id),
+        escape(module),
+        escape(&field.name),
+        l.text(keys::CP_EDIT_MESSAGE)
+    )
 }
 
 /// The caption of one column of a list.
@@ -598,7 +626,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .map_or_else(String::new, |(name, value)| {
                     format!(" when\" data-when=\"{}={}", escape(name), escape(value))
                 });
-            let wide = if matches!(field.kind, Kind::List(_) | Kind::Entries) {
+            let wide = if matches!(field.kind, Kind::List(_) | Kind::Entries | Kind::Message(_)) {
                 " wide"
             } else {
                 ""
@@ -624,6 +652,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                     list_editor(l, field, columns, index, current, input, directory)
                 }
                 Kind::Entries => entries_editor(l, field, current, input),
+                Kind::Message(_) => message_row(l, id, module, field, current),
                 _ => control(l, field, index, value, directory, field_errors.is_some()),
             };
             let _ = write!(

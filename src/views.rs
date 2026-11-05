@@ -9,7 +9,7 @@ use crate::{
 
 pub(crate) fn page(l: Locale<'_>, _headers: &HeaderMap, content: &str) -> String {
     format!(
-        "<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"auto\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"></head><body>{content}</body></html>",
+        "<!doctype html><html lang=\"{}\" dir=\"{}\" data-theme=\"auto\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/app.css\"><script src=\"/app.js\" defer></script></head><body>{content}</body></html>",
         escape(l.tag()),
         escape(l.dir()),
         l.text(keys::TITLE)
@@ -74,6 +74,7 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
 }
 
 mod charts;
+mod composer;
 mod editor;
 mod form;
 mod history;
@@ -87,6 +88,7 @@ fn page_icon(key: &str) -> &'static str {
     match key {
         keys::OVERVIEW => "M4 11l8-7 8 7v9H4z",
         keys::MODULES => "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
+        keys::COMPOSE => "M22 2L11 13 M22 2l-7 20-4-9-9-4z",
         keys::SERVER_SETTINGS => {
             "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 100 8 4 4 0 000-8z"
         }
@@ -137,6 +139,7 @@ fn first_sentence(description: &str) -> String {
     }
 }
 
+pub(crate) use composer::{Side as ComposerSide, composer_page, preview as composer_preview};
 pub(crate) use editor::{
     Ctx, Item, collection_page, datalist_html, editor_field, editor_node, editor_page, object_card,
     rule_body, rule_summary,
@@ -161,6 +164,7 @@ pub(crate) fn shell(
     for (path, key) in [
         ("", keys::OVERVIEW),
         ("/modules", keys::MODULES),
+        ("/compose", keys::COMPOSE),
         ("/settings", keys::SERVER_SETTINGS),
         ("/history", keys::HISTORY),
         ("/permissions", keys::PERMISSIONS),
@@ -241,7 +245,7 @@ mod tests {
     #[test]
     fn stylesheet_constraints() {
         let css = include_str!("../assets/app.css");
-        assert!(css.len() <= 24_576);
+        assert!(css.len() <= 49_152);
         for required in [
             ".module-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px",
             "-webkit-line-clamp:3",

@@ -12,6 +12,8 @@ pub enum Kind {
     Words,
     /// `false`, `true`, or role ids told apart by commas.
     FlagOrRoles,
+    /// A message with embeds, edited in the composer; the variables its texts may use.
+    Message(Vec<String>),
     /// A setting with pages of its own in the structured editor: rules, counters, anti-raid.
     Structured,
     /// Named entries, one row each, with a text as the value.
@@ -372,7 +374,16 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         || ty.as_array().is_some_and(|a| {
             a.len() == 2 && a.contains(&json!("string")) && a.contains(&json!("null"))
         });
-    let kind = if widget == Some("flag-or-roles") {
+    let kind = if widget == Some("message") {
+        Kind::Message(
+            schema["x-ui"]["variables"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
+        )
+    } else if widget == Some("flag-or-roles") {
         Kind::FlagOrRoles
     } else if matches!(widget, Some("json" | "entries-json")) {
         Kind::Structured
@@ -511,7 +522,7 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
-        Kind::List(_) | Kind::Entries | Kind::Structured => None,
+        Kind::List(_) | Kind::Entries | Kind::Structured | Kind::Message(_) => None,
         Kind::FlagOrRoles => match input.trim() {
             "true" => Some(json!(true)),
             "false" => Some(json!(false)),

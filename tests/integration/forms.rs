@@ -10,6 +10,11 @@ pub(super) fn bot_data(
     let data = if path == "/v1/schema" {
         let mut schema = fixture(include_str!("../fixtures/schema-basic.json"));
         if fake.structured {
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"]["properties"]["config"]
+                ["anyOf"][0]["properties"]["message"] = json!({
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "x-ui": {"widget": "message", "variables": ["user", "server"]}
+            });
             let mut parts = fixture(include_str!("../fixtures/automod-structured.json"));
             for (name, widget) in [
                 ("rules", "entries-json"),
@@ -43,6 +48,9 @@ pub(super) fn bot_data(
             ["anyOf"][0]["properties"]["<script>"] =
             json!({"type":"string","description":"<script>description</script>"});
         schema
+    } else if path.ends_with("/messages") && *method == Method::POST {
+        fake.form_body = Some(serde_json::from_slice(body).unwrap());
+        json!({"id": "77", "channel_id": "11", "url": "https://discord.com/channels/42/11/77"})
     } else if path.ends_with("/config") && *method == Method::PUT {
         fake.form_body = Some(serde_json::from_slice(body).unwrap());
         if let Some(status) = fake.form_put_status {
@@ -303,6 +311,159 @@ async fn the_anti_raid_and_each_feature_have_a_switch_of_their_own() {
     )
     .await;
     assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_message_is_written_previewed_and_sent_from_the_composer() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let page = html(response(&config, Method::GET, "/g/42/compose", "").await).await;
+    for expected in [
+        "name=\"c\"",
+        "name=\"channel\"",
+        "<option value=\"11\"># &lt;script&gt;</option>",
+        "id=\"preview\"",
+        "data-preview=\"/g/42/compose?preview=1\"",
+        "href=\"/g/42/compose\"",
+        "src=\"/app.js\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    assert!(!page.contains("style=") && !page.contains("<script>"));
+
+    let page =
+        html(response(&config, Method::POST, "/g/42/compose", "op=add_embed&c=hi").await).await;
+    assert!(page.contains("name=\"e.0.title\"") && page.contains("name=\"e.0.color\""));
+
+    // The preview shows the message as Discord does, and never what the writer could use to attack.
+    let draft = "c=**bold**+%3Cscript%3E&e.0.__=1&e.0.title=%3Cb%3E&e.0.url=javascript%3Aalert(1)&e.0.description=hello+https%3A%2F%2Fa.example\
+        &e.0.color=%235865f2&e.0.f.0.__=1&e.0.f.0.name=n&e.0.f.0.value=v&e.0.f.0.inline=1&e.0.image=http%3A%2F%2Fi.example%2Fx.png";
+    let fragment =
+        html(response(&config, Method::POST, "/g/42/compose?preview=1", draft).await).await;
+    for expected in [
+        "dc-message",
+        "dc-embed",
+        "<strong>bold</strong>",
+        "&lt;script&gt;",
+        "fill=\"#5865f2\"",
+        "dc-field inline",
+        "href=\"https://a.example\"",
+        "src=\"http://i.example/x.png\"",
+    ] {
+        assert!(fragment.contains(expected), "{expected}");
+    }
+    assert!(
+        !fragment.contains("<script")
+            && !fragment.contains("javascript:")
+            && !fragment.contains("<b>")
+    );
+
+    // Sending needs a channel and something to say, and passes the message to the bot as it was written.
+    let empty =
+        html(response(&config, Method::POST, "/g/42/compose", "op=send&c=hello").await).await;
+    assert!(empty.contains("role=\"alert\""));
+    let nothing =
+        html(response(&config, Method::POST, "/g/42/compose", "op=send&channel=11").await).await;
+    assert!(nothing.contains("role=\"alert\""));
+    assert!(state.lock().unwrap().form_body.is_none());
+    let sent = html(
+        response(
+            &config,
+            Method::POST,
+            "/g/42/compose",
+            &format!("op=send&channel=11&{draft}"),
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        sent.contains("role=\"status\"") && sent.contains("https://discord.com/channels/42/11/77")
+    );
+    let body = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(body["channel_id"], "11");
+    assert_eq!(body["message"]["embeds"][0]["color"], "#5865f2");
+    assert_eq!(
+        body["message"]["embeds"][0]["fields"],
+        json!([{"name": "n", "value": "v", "inline": true}])
+    );
+    assert_eq!(
+        response(&config, Method::POST, "/g/42/compose", "op=nothing")
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let script = response(&config, Method::GET, "/app.js", "").await;
+    assert_eq!(script.status(), StatusCode::OK);
+    assert!(
+        script.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap()
+            .contains("script-src 'self'")
+    );
+}
+
+#[tokio::test]
+async fn a_setting_that_holds_a_message_is_edited_in_the_composer() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.structured = true;
+    }
+    let module = html(response(&config, Method::GET, "/g/42/modules/welcome", "").await).await;
+    assert!(module.contains("href=\"/g/42/modules/welcome/compose/message\""));
+    let path = "/g/42/modules/welcome/compose/message";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    assert!(
+        page.contains("name=\"c\"")
+            && page.contains("<code>{user}</code>")
+            && page.contains("<code>{server}</code>")
+    );
+    assert!(!page.contains("name=\"channel\""));
+    let fragment = html(
+        response(
+            &config,
+            Method::POST,
+            &format!("{path}?preview=1"),
+            "c=Hi+%7Buser%7D",
+        )
+        .await,
+    )
+    .await;
+    assert!(fragment.contains("@新しいメンバー"), "{fragment}");
+
+    let save = |body: &'static str| response(&config, Method::POST, path, body);
+    assert_eq!(
+        save("op=save&etag=%221%22&c=Hi+%7Buser%7D").await.status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(sent["modules"]["welcome"]["config"]["message"], "Hi {user}");
+    assert_eq!(
+        save("op=save&etag=%221%22&c=Hi&e.0.__=1&e.0.title=Welcome+to+%7Bserver%7D")
+            .await
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["welcome"]["config"]["message"],
+        json!({"content": "Hi", "embeds": [{"title": "Welcome to {server}"}]})
+    );
+    assert_eq!(
+        save("op=save&etag=%221%22").await.status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert!(sent["modules"]["welcome"]["config"]["message"].is_null());
+    let other = response(
+        &config,
+        Method::GET,
+        "/g/42/modules/welcome/compose/nothing",
+        "",
+    )
+    .await;
+    assert_eq!(other.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

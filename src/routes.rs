@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod composer;
 mod editor;
 mod modules;
 mod settings;
@@ -57,6 +58,14 @@ pub fn router(config: Config) -> Router {
         .route("/g/{id}/modules", get(modules::list))
         .route("/g/{id}/settings", get(settings::edit).post(settings::save))
         .route(
+            "/g/{id}/compose",
+            get(composer::send_page).post(composer::send_post),
+        )
+        .route(
+            "/g/{id}/modules/{module}/compose/{field}",
+            get(composer::setting_page).post(composer::setting_post),
+        )
+        .route(
             "/g/{id}/modules/{module}",
             get(modules::edit).post(modules::save),
         )
@@ -74,6 +83,15 @@ pub fn router(config: Config) -> Router {
             get(editor::item).post(editor::item_save),
         )
         .route("/healthz", get(|| async { "ok" }))
+        .route(
+            "/app.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../assets/app.js"),
+                )
+            }),
+        )
         .route(
             "/app.css",
             get(|| async {
@@ -153,7 +171,8 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     let request_headers = request.headers().clone();
     let path = request.uri().path();
     let language = lang(request.headers(), &app);
-    let public = matches!(path, "/login" | "/app.css" | "/healthz") || path.starts_with("/auth/");
+    let public = matches!(path, "/login" | "/app.css" | "/app.js" | "/healthz")
+        || path.starts_with("/auth/");
     let mut response = if request.method() == Method::POST && !csrf(request.headers(), &app) {
         error_page(
             StatusCode::FORBIDDEN,
@@ -215,7 +234,7 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
         header::REFERRER_POLICY,
         HeaderValue::from_static("same-origin"),
     );
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'self'; img-src https://cdn.discordapp.com data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"));
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"));
     response
 }
 async fn run(next: Next, request: Request) -> Response {

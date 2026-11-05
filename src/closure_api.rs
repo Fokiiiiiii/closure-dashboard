@@ -313,6 +313,26 @@ impl Api {
         )
         .await
     }
+    /// Has the bot send a message to a channel of the server.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn send_message(
+        &self,
+        guild: &str,
+        channel: &str,
+        message: Value,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::POST,
+            &format!("/v1/guilds/{guild}/messages"),
+            Some(serde_json::json!({"channel_id": channel, "message": message})),
+            None,
+            Some(actor),
+        )
+        .await
+    }
     /// # Errors
     /// Returns a sanitized API or transport error.
     pub async fn put_config(
