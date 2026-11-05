@@ -155,6 +155,7 @@ col-counter-name = Counter name (a-z, 0-9, _ -)
 col-name = Name
 col-text = Text
 col-json = Settings (JSON)
+sec-roles = Roles on mute
 sec-behavior = Behavior
 sec-destination = Destination
 sec-events = What is logged

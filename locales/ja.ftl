@@ -137,6 +137,7 @@ col-counter-name = カウンター名（英小文字・数字・_ -）
 col-name = 名前
 col-text = 文言
 col-json = 設定（JSON）
+sec-roles = ミュート時のロール
 sec-behavior = 動作
 sec-destination = 送信先
 sec-events = 記録する内容

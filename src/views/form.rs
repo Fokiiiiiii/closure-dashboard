@@ -48,6 +48,7 @@ fn section_title(l: Locale<'_>, key: &str) -> String {
         "antiraid" => keys::SEC_ANTIRAID,
         "messages" => keys::SEC_MESSAGES,
         "texts" => keys::SEC_TEXTS,
+        "roles" => keys::SEC_ROLES,
         "behavior" => keys::SEC_BEHAVIOR,
         "destination" => keys::SEC_DESTINATION,
         "events" => keys::SEC_EVENTS,

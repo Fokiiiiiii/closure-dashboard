@@ -126,6 +126,7 @@ pub fn section_rank(section: &str) -> usize {
         "ban" | "antiraid" => 3,
         "escalation" => 4,
         "templates" => 5,
+        "roles" => 6,
         "messages" => 7,
         "texts" => 8,
         _ => 9,
@@ -137,6 +138,7 @@ pub fn section_rank(section: &str) -> usize {
 pub fn section(module: &str, field: &str) -> &'static str {
     match (module, field) {
         ("moderation" | "automod" | "logs" | "channels", "replies" | "texts") => "texts",
+        ("moderation" | "automod", "remove_roles_on_mute" | "restore_roles_on_mute") => "roles",
         ("moderation", "warn_expire_days" | "require_reason" | "dm_on_action") => "warn",
         ("moderation", "timeout_method" | "timeout_role") => "timeout",
         ("moderation", "voice_mute_method" | "voice_mute_role") => "voice",
@@ -681,6 +683,10 @@ pub fn settings_should_write(
 
 #[must_use]
 pub fn should_write(value: &Value, stored: Option<&Value>, effective: Option<&Value>) -> bool {
+    // A setting the configuration does not know yet, left empty, stays unset.
+    if value.is_null() && stored.is_none() && effective.is_none() {
+        return false;
+    }
     stored.is_some() || effective != Some(value)
 }
 
@@ -991,6 +997,14 @@ mod tests {
         assert_eq!(section("automod", "dm_messages.ban"), "messages");
         assert_eq!(section("logs", "replies"), "texts");
         assert_eq!(section("welcome", "texts"), "other");
+    }
+
+    #[test]
+    fn an_empty_setting_that_is_not_in_the_configuration_is_not_written() {
+        assert!(!should_write(&Value::Null, None, None));
+        assert!(should_write(&json!("x"), None, None));
+        assert!(should_write(&Value::Null, None, Some(&json!("x"))));
+        assert!(should_write(&Value::Null, Some(&json!("x")), None));
     }
 
     #[test]
