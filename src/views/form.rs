@@ -12,6 +12,7 @@ pub(crate) struct FormPage<'a> {
     pub id: &'a str,
     pub guild: &'a str,
     pub module: &'a str,
+    pub part: &'a str,
     pub schema: &'a Value,
     pub stored: &'a Value,
     pub effective: &'a Value,
@@ -33,7 +34,7 @@ fn option(output: &mut String, value: &str, label: &str, selected: bool) {
 }
 
 /// The heading of one card of a big module's settings.
-fn section_title(l: Locale<'_>, key: &str) -> String {
+pub(super) fn section_title(l: Locale<'_>, key: &str) -> String {
     l.text(match key {
         "warn" => keys::SEC_WARN,
         "timeout" => keys::SEC_TIMEOUT,
@@ -200,11 +201,7 @@ pub(super) fn control(
                 escape(value)
             )
         }
-        Kind::List(_) | Kind::Entries { .. } => String::new(),
-        Kind::Json => format!(
-            "<textarea {attrs} class=\"json\" rows=\"12\" spellcheck=\"false\">{}</textarea>",
-            escape(value)
-        ),
+        Kind::List(_) | Kind::Entries | Kind::Structured => String::new(),
         Kind::String | Kind::Roles | Kind::Words | Kind::FlagOrRoles => {
             let pattern = field.schema["pattern"]
                 .as_str()
@@ -218,6 +215,45 @@ pub(super) fn control(
             )
         }
     }
+}
+
+/// The path of one page of a module.
+pub(crate) fn part_path(id: &str, module: &str, part: &str) -> String {
+    if part.is_empty() {
+        format!("/g/{id}/modules/{module}")
+    } else {
+        format!("/g/{id}/modules/{module}/{part}")
+    }
+}
+
+/// The tabs of a big module: one link per page of it. A module with one page has none.
+pub(crate) fn part_tabs(
+    l: Locale<'_>,
+    id: &str,
+    module: &str,
+    current: &str,
+    fields: &[Field],
+) -> String {
+    let parts = form::parts(module, fields);
+    if parts.len() < 2 {
+        return String::new();
+    }
+    let mut out = String::from("<nav class=\"tabs\">");
+    for part in parts {
+        let _ = write!(
+            out,
+            "<a href=\"{}\"{}>{}</a>",
+            escape(&part_path(id, module, part)),
+            if part == current {
+                " aria-current=\"page\""
+            } else {
+                ""
+            },
+            super::modules::part_name(l, module, part)
+        );
+    }
+    out.push_str("</nav>");
+    out
 }
 
 /// The caption of one column of a list.
@@ -238,12 +274,11 @@ fn column_title(l: Locale<'_>, name: &str) -> String {
     })
 }
 
-/// One row per named entry, and one empty row to add the next. The value of an entry is a text, or
-/// JSON when `json` is set. After a refused save the rows come back as they were typed.
+/// One row per named entry, and one empty row to add the next. After a refused save the rows come
+/// back as they were typed.
 fn entries_editor(
     l: Locale<'_>,
     field: &Field,
-    json: bool,
     current: &Value,
     input: &HashMap<String, String>,
 ) -> String {
@@ -263,7 +298,6 @@ fn entries_editor(
             .map(|(name, value)| {
                 let text = match value {
                     Value::String(text) => text.clone(),
-                    value if json => serde_json::to_string_pretty(value).unwrap_or_default(),
                     value => value.to_string(),
                 };
                 (name.clone(), text, false)
@@ -290,18 +324,13 @@ fn entries_editor(
     let pattern = field.schema["propertyNames"]["pattern"]
         .as_str()
         .map_or_else(String::new, |p| format!(" pattern=\"{}\"", escape(p)));
-    let (key_title, value_title) = entry_titles(l, &field.name, json);
+    let (key_title, value_title) = entry_titles(l, &field.name);
     let mut out = String::from("<div class=\"list-editor\">");
     for (row, (name, value, removed)) in rows.iter().enumerate() {
         let cell = |part: &str| escape(&format!("f.{prefix}{row}.{part}"));
-        let (rows_attr, class) = if json {
-            (12, " class=\"json\"")
-        } else {
-            (2, "")
-        };
         let _ = write!(
             out,
-            "<div class=\"list-row\"><label class=\"list-cell list-key\"><span class=\"list-caption\">{key_title}</span><input type=\"text\" name=\"{}\" value=\"{}\" maxlength=\"64\"{pattern}></label><label class=\"list-cell list-value\"><span class=\"list-caption\">{value_title}</span><textarea name=\"{}\" rows=\"{rows_attr}\"{class} spellcheck=\"false\">{}</textarea></label>",
+            "<div class=\"list-row\"><label class=\"list-cell list-key\"><span class=\"list-caption\">{key_title}</span><input type=\"text\" name=\"{}\" value=\"{}\" maxlength=\"64\"{pattern}></label><label class=\"list-cell list-value\"><span class=\"list-caption\">{value_title}</span><textarea name=\"{}\" rows=\"2\" spellcheck=\"false\">{}</textarea></label>",
             cell("k"),
             escape(name),
             cell("v"),
@@ -323,15 +352,14 @@ fn entries_editor(
 }
 
 /// The captions of the name and of the value of a field of named entries.
-fn entry_titles(l: Locale<'_>, field: &str, json: bool) -> (String, String) {
+fn entry_titles(l: Locale<'_>, field: &str) -> (String, String) {
     let name = match field {
         "texts" => keys::COL_MESSAGE_ID,
         "rules" => keys::COL_RULE_NAME,
         "counters" => keys::COL_COUNTER_NAME,
         _ => keys::COL_NAME,
     };
-    let value = if json { keys::COL_JSON } else { keys::COL_TEXT };
-    (l.text(name), l.text(value))
+    (l.text(name), l.text(keys::COL_TEXT))
 }
 
 /// The shown text of one cell of a stored row.
@@ -465,6 +493,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         id,
         guild,
         module,
+        part,
         schema,
         stored,
         effective,
@@ -474,16 +503,17 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         errors,
         saved,
     } = *data;
-    let title = module;
     let enabled = effective["modules"][module]["enabled"]
         .as_bool()
         .unwrap_or(false);
     let mut body = format!(
         "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1>{}</header>",
         super::modules::module_icon(module),
-        escape(title),
+        super::modules::part_name(l, module, part),
         toggle(l, id, module, enabled)
     );
+    let every = form::fields(schema);
+    body.push_str(&part_tabs(l, id, module, part, &every));
     if saved {
         let _ = write!(
             body,
@@ -500,12 +530,14 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
             );
         }
     }
-    let fields = form::fields(schema);
+    let fields: Vec<Field> = every
+        .into_iter()
+        .filter(|f| form::part_of(module, &f.name) == part)
+        .collect();
     let _ = write!(
         body,
-        "<form method=\"post\" action=\"/g/{}/modules/{}\"><input type=\"hidden\" name=\"etag\" value=\"{}\">",
-        escape(id),
-        escape(module),
+        "<form method=\"post\" action=\"{}\"><input type=\"hidden\" name=\"etag\" value=\"{}\">",
+        escape(&part_path(id, module, part)),
         escape(etag)
     );
     if fields.is_empty() {
@@ -543,7 +575,6 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
             let fallback = match (&field.kind, current) {
                 (_, Value::String(s)) => s.clone(),
                 (_, Value::Null) => String::new(),
-                (Kind::Json, v) => serde_json::to_string_pretty(v).unwrap_or_default(),
                 (_, Value::Array(a)) if a.iter().all(Value::is_string) => a
                     .iter()
                     .filter_map(Value::as_str)
@@ -557,10 +588,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .map_or_else(String::new, |(name, value)| {
                     format!(" when\" data-when=\"{}={}", escape(name), escape(value))
                 });
-            let wide = if matches!(
-                field.kind,
-                Kind::List(_) | Kind::Entries { .. } | Kind::Json
-            ) {
+            let wide = if matches!(field.kind, Kind::List(_) | Kind::Entries) {
                 " wide"
             } else {
                 ""
@@ -585,7 +613,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 Kind::List(columns) => {
                     list_editor(l, field, columns, index, current, input, directory)
                 }
-                Kind::Entries { json } => entries_editor(l, field, *json, current, input),
+                Kind::Entries => entries_editor(l, field, current, input),
                 _ => control(l, field, index, value, directory, field_errors.is_some()),
             };
             let _ = write!(

@@ -9,6 +9,18 @@ pub(super) fn bot_data(
     let fixture = |source: &str| serde_json::from_str::<serde_json::Value>(source).unwrap();
     let data = if path == "/v1/schema" {
         let mut schema = fixture(include_str!("../fixtures/schema-basic.json"));
+        if fake.structured {
+            let mut parts = fixture(include_str!("../fixtures/automod-structured.json"));
+            for (name, widget) in [
+                ("rules", "entries-json"),
+                ("counters", "entries-json"),
+                ("antiraid", "json"),
+            ] {
+                parts[name]["x-ui"] = json!({"level": "basic", "widget": widget});
+            }
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["automod"]["properties"]["config"] =
+                json!({"anyOf": [{"type": "object", "properties": parts}]});
+        }
         if fake.rules {
             schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] = json!({"anyOf":[{"type":"object","properties":{"auto_delete":{
                 "type":"array","maxItems":25,"items":{"type":"object","required":["channel","after"],
@@ -17,8 +29,6 @@ pub(super) fn bot_data(
                     "after":{"type":"string","pattern":"^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
                     "skip_pinned":{"type":"boolean","default":true}}}},
                 "texts":{"description":"texts","x-ui":{"widget":"entries"}},
-                "notes":{"type":"object","propertyNames":{"pattern":"^[a-z]{1,8}$"},"x-ui":{"widget":"entries-json"}},
-                "raid":{"type":["object","null"],"x-ui":{"widget":"json"}},
                 "keep":{"x-ui":{"widget":"flag-or-roles"}}}}]});
         }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
@@ -74,15 +84,30 @@ pub(super) fn bot_data(
 }
 
 #[tokio::test]
-async fn a_list_is_edited_row_by_row() {
+async fn the_parts_of_a_module_are_pages_of_their_own() {
     let (config, state) = setup().await;
     {
         let mut state = state.lock().unwrap();
         state.forms = true;
         state.rules = true;
     }
-    let path = "/g/42/modules/channels";
-    let page = html(response(&config, Method::GET, path, "").await).await;
+    let main = "/g/42/modules/channels";
+    let rules = format!("{main}/auto_delete");
+    let texts = format!("{main}/texts");
+    let page = html(response(&config, Method::GET, main, "").await).await;
+    for expected in [
+        "name=\"f.keep\"",
+        "<nav class=\"tabs\">",
+        "href=\"/g/42/modules/channels/auto_delete\"",
+        "href=\"/g/42/modules/channels/texts\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    assert!(!page.contains("f.auto_delete") && !page.contains("f.texts"));
+    let missing = response(&config, Method::GET, &format!("{main}/nothing"), "").await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let page = html(response(&config, Method::GET, &rules, "").await).await;
     for expected in [
         "name=\"f.auto_delete.0.channel\"",
         "name=\"f.auto_delete.0.after\"",
@@ -92,57 +117,41 @@ async fn a_list_is_edited_row_by_row() {
     ] {
         assert!(page.contains(expected), "{expected}");
     }
-    assert!(!page.contains("f.auto_delete.0.x"));
-    assert!(!page.contains("style="));
+    assert!(!page.contains("f.auto_delete.0.x") && !page.contains("style="));
     let rule = "etag=%221%22&f.auto_delete.0.channel=11&f.auto_delete.0.after=1h+30m\
         &f.auto_delete.0.skip_pinned=false&f.auto_delete.0.skip_pinned=true";
-    let result = response(&config, Method::POST, path, rule).await;
+    let result = response(&config, Method::POST, &rules, rule).await;
     assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        result.headers()[header::LOCATION],
+        "/g/42/modules/channels/auto_delete?saved=1"
+    );
     let sent = state.lock().unwrap().form_body.clone().unwrap();
     assert_eq!(
         sent["modules"]["channels"]["config"]["auto_delete"],
         json!([{"channel": "11", "after": "1h 30m", "skip_pinned": true}])
     );
-    let result = response(&config, Method::POST, path, "etag=%221%22&f.keep=1%2C+22").await;
+    let result = response(&config, Method::POST, main, "etag=%221%22&f.keep=1%2C+22").await;
     assert_eq!(result.status(), StatusCode::SEE_OTHER);
     let sent = state.lock().unwrap().form_body.clone().unwrap();
     assert_eq!(
         sent["modules"]["channels"]["config"]["keep"],
         json!(["1", "22"])
     );
-    let page = html(response(&config, Method::GET, path, "").await).await;
-    for expected in [
-        "name=\"f.texts.0.k\"",
-        "name=\"f.notes.0.v\"",
-        "pattern=\"^[a-z]{1,8}$\"",
-        "class=\"json\"",
-        "name=\"f.raid\"",
-        "name=\"f.keep\"",
-    ] {
-        assert!(page.contains(expected), "{expected}");
-    }
-    let entries = "etag=%221%22&f.texts.0.k=sdk-done&f.texts.0.v=Noted.\
-        &f.notes.0.k=spam&f.notes.0.v=%7B%22on%22%3Atrue%7D&f.raid=%7B%22levels%22%3A%5B%5D%7D";
-    let result = response(&config, Method::POST, path, entries).await;
+    let page = html(response(&config, Method::GET, &texts, "").await).await;
+    assert!(page.contains("name=\"f.texts.0.k\""));
+    let entries = "etag=%221%22&f.texts.0.k=sdk-done&f.texts.0.v=Noted.";
+    let result = response(&config, Method::POST, &texts, entries).await;
     assert_eq!(result.status(), StatusCode::SEE_OTHER);
     let sent = state.lock().unwrap().form_body.clone().unwrap();
-    let saved = &sent["modules"]["channels"]["config"];
-    assert_eq!(saved["texts"], json!({"sdk-done": "Noted."}));
-    assert_eq!(saved["notes"], json!({"spam": {"on": true}}));
-    assert_eq!(saved["raid"], json!({"levels": []}));
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["texts"],
+        json!({"sdk-done": "Noted."})
+    );
     let result = response(
         &config,
         Method::POST,
-        path,
-        "etag=%221%22&f.notes.0.k=spam&f.notes.0.v=%7B",
-    )
-    .await;
-    assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(html(result).await.contains("spam: "));
-    let result = response(
-        &config,
-        Method::POST,
-        path,
+        &rules,
         "etag=%221%22&f.auto_delete.0.channel=11&f.auto_delete.0.after=",
     )
     .await;
@@ -150,6 +159,105 @@ async fn a_list_is_edited_row_by_row() {
     let page = html(result).await;
     assert!(page.contains("role=\"alert\""));
     assert!(page.contains("<option value=\"11\" selected>"));
+}
+
+#[tokio::test]
+async fn rules_are_cards_and_not_text() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.structured = true;
+    }
+    let rules = "/g/42/modules/automod/rules";
+    let page = html(response(&config, Method::GET, rules, "").await).await;
+    assert!(
+        page.contains("ルールを追加") && page.contains("href=\"/g/42/modules/automod/rules/new\"")
+    );
+    assert!(page.contains("class=\"tabs\"") && page.contains("/g/42/modules/automod/antiraid"));
+    let page = html(response(&config, Method::GET, &format!("{rules}/new"), "").await).await;
+    for expected in [
+        "name=\"__id\"",
+        "name=\"r.name\"",
+        "name=\"new.r.triggers\"",
+        "name=\"new.r.actions\"",
+        "禁止単語を含む",
+        "メッセージを削除する",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    assert!(!page.contains("<textarea") && !page.contains("style="));
+
+    // Adding a condition shows its fields and keeps what was typed.
+    let add = "etag=%221%22&op=add%3Ar.triggers&new.r.triggers=words&__id=spam&r.name=Spam";
+    let page = html(response(&config, Method::POST, &format!("{rules}/new"), add).await).await;
+    assert!(page.contains("name=\"r.triggers.0.words\"") && page.contains("value=\"spam\""));
+
+    let save = "etag=%221%22&op=save&__id=spam&r.name=Spam&r.triggers.0.__t=words&r.triggers.0.words=bad%0Aworse\
+        &r.actions.0.__t=reply&r.actions.0.text=No&r.actions.1.__t=delete&r.enabled=true";
+    let result = response(&config, Method::POST, &format!("{rules}/new"), save).await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        result.headers()[header::LOCATION],
+        "/g/42/modules/automod/rules/spam?saved=1"
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["automod"]["config"]["rules"]["spam"],
+        json!({
+            "name": "Spam",
+            "triggers": [{"type": "words", "words": ["bad", "worse"]}],
+            "actions": [{"do": "reply", "text": "No"}, {"do": "delete"}]
+        })
+    );
+
+    // A rule without an action, and a name that is not allowed, are refused.
+    let bad = "etag=%221%22&op=save&__id=Bad+Name&r.triggers.0.__t=any_message";
+    let result = response(&config, Method::POST, &format!("{rules}/new"), bad).await;
+    assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = html(result).await;
+    assert!(page.matches("role=\"alert\"").count() >= 2, "{page}");
+    let result = response(
+        &config,
+        Method::POST,
+        &format!("{rules}/new"),
+        "etag=%221%22&op=nothing",
+    )
+    .await;
+    assert_eq!(result.status(), StatusCode::BAD_REQUEST);
+    let missing = response(
+        &config,
+        Method::GET,
+        "/g/42/modules/automod/rules/nothing",
+        "",
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_anti_raid_has_a_page_with_a_switch() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.structured = true;
+    }
+    let path = "/g/42/modules/automod/antiraid";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    assert!(page.contains("name=\"on\"") && page.contains("name=\"r.levels\""));
+    let on = "etag=%221%22&op=save&on=1&r.levels=none%0Alow&r.effects.0.__k=low&r.effects.0.slowmode.__on=1&r.effects.0.slowmode.seconds=10";
+    let result = response(&config, Method::POST, path, on).await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["automod"]["config"]["antiraid"],
+        json!({"levels": ["none", "low"], "effects": {"low": {"slowmode": {"seconds": 10}}}})
+    );
+    let off = response(&config, Method::POST, path, "etag=%221%22&op=save").await;
+    assert_eq!(off.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert!(sent["modules"]["automod"]["config"]["antiraid"].is_null());
 }
 
 #[tokio::test]

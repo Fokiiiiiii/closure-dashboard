@@ -63,30 +63,101 @@ fn category_icon(category: usize) -> &'static str {
     }
 }
 
-fn module_tile(l: Locale<'_>, id: &str, module: &str, schema: &Value, effective: &Value) -> String {
+/// The name a module goes by in the dashboard: its own, translated; an unknown module keeps its id.
+pub(super) fn module_name(l: Locale<'_>, module: &str) -> String {
+    match module {
+        "moderation" => l.text(keys::MOD_MODERATION),
+        "automod" => l.text(keys::MOD_AUTOMOD),
+        "logs" => l.text(keys::MOD_LOGS),
+        "welcome" => l.text(keys::MOD_WELCOME),
+        "channels" => l.text(keys::MOD_CHANNELS),
+        "tags" => l.text(keys::MOD_TAGS),
+        "remind" => l.text(keys::MOD_REMIND),
+        "diagnostics" => l.text(keys::MOD_DIAGNOSTICS),
+        "dashboard" => l.text(keys::MOD_DASHBOARD),
+        other => escape(other),
+    }
+}
+
+/// The name of one page of a module: the module's own for its main page.
+pub(crate) fn part_name(l: Locale<'_>, module: &str, part: &str) -> String {
+    if part.is_empty() {
+        module_name(l, module)
+    } else {
+        super::form::section_title(l, part)
+    }
+}
+
+/// The title of a tile. The texts and the messages of every big module are named alike, so they
+/// carry the module's name.
+fn tile_title(l: Locale<'_>, module: &str, part: &str) -> String {
+    if matches!(part, "messages" | "texts") {
+        format!("{}: {}", module_name(l, module), part_name(l, module, part))
+    } else {
+        part_name(l, module, part)
+    }
+}
+
+/// One tile per part of a module, so that the escalation, the rules or the anti-raid of a big
+/// module are entries of their own. Only the first tile carries the module's switch.
+fn module_tiles(
+    l: Locale<'_>,
+    id: &str,
+    module: &str,
+    schema: &Value,
+    effective: &Value,
+) -> Vec<String> {
     let enabled = effective["modules"][module]["enabled"]
         .as_bool()
         .unwrap_or(false);
-    let description = schema["description"].as_str().unwrap_or("");
-    let action = if form::fields(schema).is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}\">{}</a>",
-            escape(id),
-            escape(module),
-            l.text(keys::SETTINGS)
-        )
-    };
-    format!(
-        "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
-        if enabled { "enabled" } else { "disabled" },
-        module_icon(module),
-        escape(module),
-        toggle(l, id, module, enabled),
-        escape(description),
-        escape(&super::first_sentence(description))
-    )
+    let fields = form::fields(schema);
+    let parts = form::parts(module, &fields);
+    let mut tiles = Vec::new();
+    for n in 0..parts.len().max(1) {
+        let part = parts.get(n).copied().unwrap_or("");
+        let description = if n == 0 {
+            schema["description"].as_str().unwrap_or("").to_owned()
+        } else {
+            // What a part is for is said by the dashboard; the bot's text names a single field.
+            l.find(&format!("ed-pd-{part}")).unwrap_or_else(|| {
+                fields
+                    .iter()
+                    .find(|f| form::part_of(module, &f.name) == part)
+                    .and_then(|f| f.schema["description"].as_str())
+                    .unwrap_or("")
+                    .to_owned()
+            })
+        };
+        let action = if parts.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<a class=\"button secondary module-action\" href=\"/g/{}/modules/{}{}\">{}</a>",
+                escape(id),
+                escape(module),
+                if n == 0 {
+                    String::new()
+                } else {
+                    format!("/{part}")
+                },
+                l.text(keys::SETTINGS)
+            )
+        };
+        let switch = if n == 0 {
+            toggle(l, id, module, enabled)
+        } else {
+            String::new()
+        };
+        tiles.push(format!(
+            "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{switch}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
+            if enabled { "enabled" } else { "disabled" },
+            module_icon(module),
+            tile_title(l, module, if n == 0 { "" } else { part }),
+            escape(&description),
+            escape(&super::first_sentence(&description))
+        ));
+    }
+    tiles
 }
 
 pub(crate) fn modules_page(
@@ -109,11 +180,12 @@ pub(crate) fn modules_page(
                 .map(|rank| (c, rank))
         });
         let (category, rank) = place.unwrap_or((CATEGORIES.len(), 0));
-        tiles.push((
-            category,
-            rank,
-            module_tile(l, id, &module, &schema, effective),
-        ));
+        for (part, tile) in module_tiles(l, id, &module, &schema, effective)
+            .into_iter()
+            .enumerate()
+        {
+            tiles.push((category, rank * 100 + part, tile));
+        }
     }
     tiles.sort_by_key(|(category, rank, _)| (*category, *rank));
     let mut body = format!(

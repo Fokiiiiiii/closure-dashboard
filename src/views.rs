@@ -74,6 +74,7 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
 }
 
 mod charts;
+mod editor;
 mod form;
 mod history;
 mod modules;
@@ -136,9 +137,13 @@ fn first_sentence(description: &str) -> String {
     }
 }
 
-pub(crate) use form::{FormPage, form_page};
+pub(crate) use editor::{
+    Ctx, Item, collection_page, datalist_html, editor_field, editor_node, editor_page, object_card,
+    rule_body, rule_summary,
+};
+pub(crate) use form::{FormPage, form_page, part_path};
 pub(crate) use history::history;
-pub(crate) use modules::modules_page;
+pub(crate) use modules::{modules_page, part_name};
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
 pub(crate) use settings::{SettingsPage, settings_page};

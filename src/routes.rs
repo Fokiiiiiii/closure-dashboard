@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod editor;
 mod modules;
 mod settings;
 
@@ -60,6 +61,14 @@ pub fn router(config: Config) -> Router {
             get(modules::edit).post(modules::save),
         )
         .route("/g/{id}/modules/{module}/toggle", post(toggle))
+        .route(
+            "/g/{id}/modules/{module}/{part}",
+            get(modules::edit_part).post(modules::save_part),
+        )
+        .route(
+            "/g/{id}/modules/{module}/{part}/{key}",
+            get(editor::item).post(editor::item_save),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .route(
             "/app.css",
@@ -70,8 +79,8 @@ pub fn router(config: Config) -> Router {
                 )
             }),
         )
-        .layer(DefaultBodyLimit::max(65536))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(65536))
+        .layer(DefaultBodyLimit::max(262_144))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(262_144))
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }

@@ -66,6 +66,7 @@ struct Fake {
     form_put_status: Option<StatusCode>,
     form_body: Option<serde_json::Value>,
     rules: bool,
+    structured: bool,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -546,7 +547,7 @@ async fn csrf_state_body_and_validation() {
         &config,
         Method::POST,
         "/g/42/modules/mod/toggle",
-        &format!("enabled={}", "a".repeat(65 * 1024)),
+        &format!("enabled={}", "a".repeat(257 * 1024)),
     );
     assert_eq!(
         router(config).oneshot(large).await.unwrap().status(),

@@ -46,7 +46,7 @@ pub mod keys {
         SETTINGS_PREFIX = "settings-prefix", SETTINGS_LOG_CHANNEL = "settings-log-channel",
         SETTINGS_MODERATOR_ROLES = "settings-moderator-roles",
         LANG_AUTO = "lang-auto", LANG_JA = "lang-ja", LANG_EN = "lang-en",
-        CAT_MODERATION = "cat-moderation", CAT_COMMUNITY = "cat-community", CAT_SYSTEM = "cat-system", CAT_OTHER = "cat-other", SEC_WARN = "sec-warn", SEC_TIMEOUT = "sec-timeout", SEC_VOICE = "sec-voice", SEC_BAN = "sec-ban", SEC_BEHAVIOR = "sec-behavior", SEC_DESTINATION = "sec-destination", SEC_EVENTS = "sec-events", SEC_AUTO_DELETE = "sec-auto-delete", SEC_AUTO_REACT = "sec-auto-react", COL_CHANNEL = "col-channel", COL_AFTER = "col-after", COL_SKIP_PINNED = "col-skip-pinned", COL_EMOJIS = "col-emojis", COL_SKIP_BOTS = "col-skip-bots", COL_REMOVE = "col-remove", SEC_ESCALATION = "sec-escalation", COL_WARNS = "col-warns", COL_ACTION = "col-action", COL_DURATION = "col-duration", OPT_TIMEOUT = "opt-timeout", OPT_KICK = "opt-kick", OPT_BAN = "opt-ban", SEC_TEMPLATES = "sec-templates", COL_ID = "col-id", COL_LABEL = "col-label", COL_REASON = "col-reason", SEC_RULES = "sec-rules", SEC_COUNTERS = "sec-counters", SEC_ANTIRAID = "sec-antiraid", SEC_MESSAGES = "sec-messages", SEC_TEXTS = "sec-texts", COL_MESSAGE_ID = "col-message-id", COL_RULE_NAME = "col-rule-name", COL_COUNTER_NAME = "col-counter-name", COL_NAME = "col-name", COL_TEXT = "col-text", COL_JSON = "col-json", SEC_ROLES = "sec-roles",
+        CAT_MODERATION = "cat-moderation", CAT_COMMUNITY = "cat-community", CAT_SYSTEM = "cat-system", CAT_OTHER = "cat-other", SEC_WARN = "sec-warn", SEC_TIMEOUT = "sec-timeout", SEC_VOICE = "sec-voice", SEC_BAN = "sec-ban", SEC_BEHAVIOR = "sec-behavior", SEC_DESTINATION = "sec-destination", SEC_EVENTS = "sec-events", SEC_AUTO_DELETE = "sec-auto-delete", SEC_AUTO_REACT = "sec-auto-react", COL_CHANNEL = "col-channel", COL_AFTER = "col-after", COL_SKIP_PINNED = "col-skip-pinned", COL_EMOJIS = "col-emojis", COL_SKIP_BOTS = "col-skip-bots", COL_REMOVE = "col-remove", SEC_ESCALATION = "sec-escalation", COL_WARNS = "col-warns", COL_ACTION = "col-action", COL_DURATION = "col-duration", OPT_TIMEOUT = "opt-timeout", OPT_KICK = "opt-kick", OPT_BAN = "opt-ban", SEC_TEMPLATES = "sec-templates", COL_ID = "col-id", COL_LABEL = "col-label", COL_REASON = "col-reason", SEC_RULES = "sec-rules", SEC_COUNTERS = "sec-counters", SEC_ANTIRAID = "sec-antiraid", SEC_MESSAGES = "sec-messages", SEC_TEXTS = "sec-texts", COL_MESSAGE_ID = "col-message-id", COL_RULE_NAME = "col-rule-name", COL_COUNTER_NAME = "col-counter-name", COL_NAME = "col-name", COL_TEXT = "col-text", COL_JSON = "col-json", SEC_ROLES = "sec-roles", ED_ERR_REQUIRED = "editor-err-required", ED_ERR_INVALID = "editor-err-invalid", ED_ERR_REPEATED = "editor-err-repeated", ED_DEFAULT = "editor-default", ED_ON = "editor-on", ED_OFF = "editor-off", ED_DURATION_EXAMPLE = "editor-duration-example", ED_REVERSE_CONDITION = "editor-reverse-condition", ED_ADD = "editor-add", ED_ADD_CONDITION = "editor-add-condition", ED_ADD_ACTION = "editor-add-action", ED_ADD_RULE = "editor-add-rule", ED_ADD_COUNTER = "editor-add-counter", ED_REMOVE = "editor-remove", ED_EDIT = "editor-edit", ED_IF = "editor-if", ED_IF_HINT = "editor-if-hint", ED_THEN = "editor-then", ED_THEN_HINT = "editor-then-hint", ED_BASIC = "editor-basic", ED_SCOPE = "editor-scope", ED_MORE = "editor-more", ED_NO_RULES = "editor-no-rules", ED_NO_COUNTERS = "editor-no-counters", ED_NO_TRIGGERS = "editor-no-triggers", ED_NO_ACTIONS = "editor-no-actions", ED_BACK = "editor-back", ED_ANTIRAID_ON = "editor-antiraid-on", ED_UNSUPPORTED = "editor-unsupported", ED_NEW_RULE = "editor-new-rule", ED_NEW_COUNTER = "editor-new-counter", ED_NAME_KEY = "editor-name-key", MOD_MODERATION = "mod-moderation", MOD_AUTOMOD = "mod-automod", MOD_LOGS = "mod-logs", MOD_WELCOME = "mod-welcome", MOD_CHANNELS = "mod-channels", MOD_TAGS = "mod-tags", MOD_REMIND = "mod-remind", MOD_DIAGNOSTICS = "mod-diagnostics", MOD_DASHBOARD = "mod-dashboard",
         OPT_DISCORD = "opt-discord", OPT_ROLE = "opt-role", OPT_PRIVATE = "opt-private", OPT_PUBLIC = "opt-public",
         HISTORY_ENABLED = "history-enabled", HISTORY_DISABLED = "history-disabled",
         HISTORY_CONFIG = "history-config", HISTORY_ADD = "history-add", HISTORY_RESET = "history-reset",
@@ -270,6 +270,24 @@ impl<'a> Locale<'a> {
         }
         self.format(key, Some(&args))
     }
+    /// The text of a key, or `None` when no catalog has it: for the labels of the structured
+    /// editor, whose keys follow the names in the bot's schema and may be missing for a new one.
+    #[must_use]
+    pub fn find(self, key: &str) -> Option<String> {
+        let parent = self.tag.split_once('-').map_or(self.tag, |(tag, _)| tag);
+        for tag in [self.tag, parent, "ja"] {
+            if let Some((_, bundle)) = self.catalogs.entries.iter().find(|(d, _)| d.tag == tag)
+                && let Some(pattern) = bundle.get_message(key).and_then(|m| m.value())
+            {
+                let mut errors = Vec::new();
+                let result = bundle.format_pattern(pattern, None, &mut errors);
+                if errors.is_empty() {
+                    return Some(escape(&result));
+                }
+            }
+        }
+        None
+    }
     fn format(self, key: &str, args: Option<&FluentArgs<'_>>) -> String {
         let parent = self.tag.split_once('-').map_or(self.tag, |(tag, _)| tag);
         for tag in [self.tag, parent, "ja"] {
@@ -375,8 +393,14 @@ mod tests {
     fn catalog_files_keys_and_variables_match() {
         let catalog = Catalogs::new(REGISTRY).unwrap();
         let expected = signatures(REGISTRY[0].source);
+        // The labels of the structured editor (`ed-...`) follow the names in the bot's schema, so
+        // they are looked up by name and not declared as constants.
         assert_eq!(
-            expected.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            expected
+                .keys()
+                .map(String::as_str)
+                .filter(|key| !key.starts_with("ed-"))
+                .collect::<BTreeSet<_>>(),
             keys::ALL.iter().copied().collect()
         );
         let files: BTreeSet<_> = std::fs::read_dir("locales")

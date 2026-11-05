@@ -1,0 +1,1599 @@
+{
+ "rules": {
+  "anyOf": [
+   {
+    "additionalProperties": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "null"
+       },
+       "properties": {
+        "actions": {
+         "anyOf": [
+          {
+           "description": "順番に実行します。",
+           "items": {
+            "oneOf": [
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "delete"
+               }
+              },
+              "required": [
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "purge"
+               },
+               "within": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "within"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "warn"
+               },
+               "reason": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "timeout"
+               },
+               "duration": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "reason": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "duration"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "kick"
+               },
+               "reason": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "delete_days": {
+                "maximum": 7,
+                "minimum": 0,
+                "type": "integer"
+               },
+               "do": {
+                "const": "ban"
+               },
+               "duration": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "reason": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "auto_delete": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "do": {
+                "const": "reply"
+               },
+               "text": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "text"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "channel": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "do": {
+                "const": "alert"
+               },
+               "text": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "channel",
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "add_roles"
+               },
+               "roles": {
+                "items": {
+                 "pattern": "^[0-9]{1,20}$",
+                 "type": "string"
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array"
+               }
+              },
+              "required": [
+               "do",
+               "roles"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "remove_roles"
+               },
+               "roles": {
+                "items": {
+                 "pattern": "^[0-9]{1,20}$",
+                 "type": "string"
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array"
+               }
+              },
+              "required": [
+               "do",
+               "roles"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "set_nickname"
+               },
+               "name": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "name"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "channels": {
+                "items": {
+                 "pattern": "^[0-9]{1,20}$",
+                 "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+               },
+               "do": {
+                "const": "slowmode"
+               },
+               "duration": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "duration"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "allow": {
+                "items": {
+                 "enum": [
+                  "send_messages",
+                  "send_messages_in_threads",
+                  "add_reactions",
+                  "attach_files",
+                  "embed_links",
+                  "create_public_threads",
+                  "create_private_threads",
+                  "speak",
+                  "connect",
+                  "use_external_emojis",
+                  "mention_everyone",
+                  "send_tts_messages"
+                 ]
+                },
+                "type": "array",
+                "uniqueItems": true
+               },
+               "channel": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "clear": {
+                "items": {
+                 "enum": [
+                  "send_messages",
+                  "send_messages_in_threads",
+                  "add_reactions",
+                  "attach_files",
+                  "embed_links",
+                  "create_public_threads",
+                  "create_private_threads",
+                  "speak",
+                  "connect",
+                  "use_external_emojis",
+                  "mention_everyone",
+                  "send_tts_messages"
+                 ]
+                },
+                "type": "array",
+                "uniqueItems": true
+               },
+               "deny": {
+                "items": {
+                 "enum": [
+                  "send_messages",
+                  "send_messages_in_threads",
+                  "add_reactions",
+                  "attach_files",
+                  "embed_links",
+                  "create_public_threads",
+                  "create_private_threads",
+                  "speak",
+                  "connect",
+                  "use_external_emojis",
+                  "mention_everyone",
+                  "send_tts_messages"
+                 ]
+                },
+                "type": "array",
+                "uniqueItems": true
+               },
+               "do": {
+                "const": "change_permissions"
+               },
+               "duration": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "target": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "duration"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "amount": {
+                "maximum": 2147483647,
+                "minimum": -2147483647,
+                "type": "integer"
+               },
+               "counter": {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+               },
+               "do": {
+                "const": "add_to_counter"
+               }
+              },
+              "required": [
+               "amount",
+               "counter",
+               "do"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "counter": {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+               },
+               "do": {
+                "const": "set_counter"
+               },
+               "value": {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+               }
+              },
+              "required": [
+               "counter",
+               "do",
+               "value"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "do": {
+                "const": "set_antiraid_level"
+               },
+               "duration": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "level": {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "do",
+               "level"
+              ],
+              "type": "object"
+             }
+            ]
+           },
+           "maxItems": 12,
+           "minItems": 1,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "continue_after_match": {
+         "anyOf": [
+          {
+           "description": "このルールが当たったとき、後のルールも判定するかどうか。",
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "cooldown": {
+         "anyOf": [
+          {
+           "description": "ルールが一人のメンバーに対して動作した後、この期間はそのメンバーに対して判定しません。",
+           "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "enabled": {
+         "anyOf": [
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "name": {
+         "anyOf": [
+          {
+           "description": "ログに表示する名前。既定は ID です。",
+           "maxLength": 64,
+           "minLength": 1,
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "scope": {
+         "anyOf": [
+          {
+           "additionalProperties": {
+            "type": "null"
+           },
+           "properties": {
+            "channels": {
+             "anyOf": [
+              {
+               "items": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "maxItems": 100,
+               "type": "array"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "exclude_channels": {
+             "anyOf": [
+              {
+               "items": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "maxItems": 100,
+               "type": "array"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "exclude_roles": {
+             "anyOf": [
+              {
+               "items": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "maxItems": 100,
+               "type": "array"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "exempt_moderators": {
+             "anyOf": [
+              {
+               "type": "boolean"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "include_bots": {
+             "anyOf": [
+              {
+               "type": "boolean"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "member_age": {
+             "anyOf": [
+              {
+               "additionalProperties": {
+                "type": "null"
+               },
+               "properties": {
+                "max_days": {
+                 "anyOf": [
+                  {
+                   "maximum": 36500,
+                   "minimum": 0,
+                   "type": "integer"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                },
+                "min_days": {
+                 "anyOf": [
+                  {
+                   "maximum": 36500,
+                   "minimum": 0,
+                   "type": "integer"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                }
+               },
+               "type": "object"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "roles": {
+             "anyOf": [
+              {
+               "items": {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+               },
+               "maxItems": 100,
+               "type": "array"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            }
+           },
+           "type": "object"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "triggers": {
+         "anyOf": [
+          {
+           "description": "どれか一つが当たれば、ルールが当たったことになります。",
+           "items": {
+            "oneOf": [
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "any_message"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "case_sensitive": {
+                "type": "boolean"
+               },
+               "normalize": {
+                "type": "boolean"
+               },
+               "strip_markdown": {
+                "type": "boolean"
+               },
+               "targets": {
+                "items": {
+                 "enum": [
+                  "message",
+                  "username"
+                 ],
+                 "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+               },
+               "type": {
+                "const": "words"
+               },
+               "whole_words": {
+                "type": "boolean"
+               },
+               "words": {
+                "items": {
+                 "maxLength": 100,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 500,
+                "minItems": 1,
+                "type": "array"
+               }
+              },
+              "required": [
+               "type",
+               "words"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "case_sensitive": {
+                "type": "boolean"
+               },
+               "normalize": {
+                "type": "boolean"
+               },
+               "patterns": {
+                "items": {
+                 "format": "regex",
+                 "maxLength": 200,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+               },
+               "strip_markdown": {
+                "type": "boolean"
+               },
+               "targets": {
+                "items": {
+                 "enum": [
+                  "message",
+                  "username"
+                 ],
+                 "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+               },
+               "type": {
+                "const": "regex"
+               }
+              },
+              "required": [
+               "patterns",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "domains": {
+                "items": {
+                 "maxLength": 253,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+               },
+               "exclude_regex": {
+                "items": {
+                 "format": "regex",
+                 "maxLength": 200,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "include_regex": {
+                "items": {
+                 "format": "regex",
+                 "maxLength": 200,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "include_subdomains": {
+                "type": "boolean"
+               },
+               "mode": {
+                "enum": [
+                 "any",
+                 "allowlist",
+                 "blocklist"
+                ],
+                "type": "string"
+               },
+               "only_real_links": {
+                "type": "boolean"
+               },
+               "type": {
+                "const": "links"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "allow_codes": {
+                "items": {
+                 "maxLength": 64,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+               },
+               "block_codes": {
+                "items": {
+                 "maxLength": 64,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+               },
+               "type": {
+                "const": "invites"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "allowed_extensions": {
+                "items": {
+                 "maxLength": 16,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "allowed_mime_types": {
+                "items": {
+                 "maxLength": 64,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "blocked_extensions": {
+                "items": {
+                 "maxLength": 16,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "blocked_mime_types": {
+                "items": {
+                 "maxLength": 64,
+                 "minLength": 1,
+                 "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+               },
+               "max_count": {
+                "maximum": 10,
+                "minimum": 0,
+                "type": "integer"
+               },
+               "min_count": {
+                "maximum": 10,
+                "minimum": 1,
+                "type": "integer"
+               },
+               "type": {
+                "const": "attachments"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "max_ratio": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+               },
+               "min_letters": {
+                "maximum": 2000,
+                "minimum": 1,
+                "type": "integer"
+               },
+               "type": {
+                "const": "caps"
+               }
+              },
+              "required": [
+               "max_ratio",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "max_run": {
+                "maximum": 2000,
+                "minimum": 2,
+                "type": "integer"
+               },
+               "type": {
+                "const": "repeat"
+               }
+              },
+              "required": [
+               "max_run",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "max": {
+                "maximum": 10,
+                "minimum": 0,
+                "type": "integer"
+               },
+               "type": {
+                "const": "stickers"
+               }
+              },
+              "required": [
+               "max",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "new_threshold": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               },
+               "only_new": {
+                "type": "boolean"
+               },
+               "type": {
+                "const": "member_join"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "amount": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+               },
+               "type": {
+                "const": "member_join_spam"
+               },
+               "within": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "amount",
+               "type",
+               "within"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "member_leave"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "roles": {
+                "items": {
+                 "pattern": "^[0-9]{1,20}$",
+                 "type": "string"
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array"
+               },
+               "type": {
+                "const": "role_added"
+               }
+              },
+              "required": [
+               "roles",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "roles": {
+                "items": {
+                 "pattern": "^[0-9]{1,20}$",
+                 "type": "string"
+                },
+                "maxItems": 25,
+                "minItems": 1,
+                "type": "array"
+               },
+               "type": {
+                "const": "role_removed"
+               }
+              },
+              "required": [
+               "roles",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "include_own": {
+                "type": "boolean"
+               },
+               "kinds": {
+                "items": {
+                 "enum": [
+                  "warn",
+                  "note",
+                  "timeout",
+                  "untimeout",
+                  "kick",
+                  "ban",
+                  "unban",
+                  "vcmute",
+                  "vcunmute"
+                 ],
+                 "type": "string"
+                },
+                "maxItems": 9,
+                "type": "array"
+               },
+               "type": {
+                "const": "case"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "amount": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+               },
+               "type": {
+                "const": "thread_create_spam"
+               },
+               "within": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "amount",
+               "type",
+               "within"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "thread_created"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "thread_archived"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "thread_unarchived"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "type": {
+                "const": "thread_deleted"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "counter": {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+               },
+               "reverse": {
+                "type": "boolean"
+               },
+               "trigger": {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+               },
+               "type": {
+                "const": "counter"
+               }
+              },
+              "required": [
+               "counter",
+               "trigger",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "dependentRequired": {
+               "distinct_users": [
+                "within"
+               ]
+              },
+              "properties": {
+               "amount": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+               },
+               "distinct_channels": {
+                "maximum": 50,
+                "minimum": 2,
+                "type": "integer"
+               },
+               "distinct_users": {
+                "maximum": 4294967295,
+                "minimum": 2,
+                "type": "integer"
+               },
+               "group_identical_messages": {
+                "type": "boolean"
+               },
+               "ignore_identical_messages": {
+                "type": "boolean"
+               },
+               "measure": {
+                "enum": [
+                 "messages",
+                 "mentions",
+                 "links",
+                 "attachments",
+                 "emojis",
+                 "lines",
+                 "characters",
+                 "stickers",
+                 "duplicates"
+                ],
+                "type": "string"
+               },
+               "per_channel": {
+                "type": "boolean"
+               },
+               "threads_as_parent_channel": {
+                "description": "スパムの集計で、親が分かるスレッドを親チャンネルとして数えます。",
+                "type": "boolean",
+                "x-ui": {
+                 "level": "advanced"
+                }
+               },
+               "type": {
+                "const": "spam"
+               },
+               "within": {
+                "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+                "type": "string"
+               }
+              },
+              "required": [
+               "amount",
+               "measure",
+               "type"
+              ],
+              "type": "object"
+             },
+             {
+              "additionalProperties": false,
+              "properties": {
+               "from": {
+                "items": {
+                 "pattern": "^[a-z0-9_-]{1,32}$",
+                 "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+               },
+               "levels": {
+                "items": {
+                 "pattern": "^[a-z0-9_-]{1,32}$",
+                 "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+               },
+               "type": {
+                "const": "antiraid_level"
+               }
+              },
+              "required": [
+               "type"
+              ],
+              "type": "object"
+             }
+            ]
+           },
+           "maxItems": 20,
+           "minItems": 1,
+           "type": "array"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "description": "ルール。ID で区別します。すべてのメッセージを判定し、ID の順に確認します。続行の指定がない限り、最初に当たったルールが動作します。",
+    "type": "object"
+   },
+   {
+    "type": "null"
+   }
+  ]
+ },
+ "counters": {
+  "anyOf": [
+   {
+    "additionalProperties": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "null"
+       },
+       "properties": {
+        "decay": {
+         "anyOf": [
+          {
+           "additionalProperties": {
+            "type": "null"
+           },
+           "properties": {
+            "amount": {
+             "anyOf": [
+              {
+               "maximum": 2147483647,
+               "minimum": -2147483647,
+               "type": "integer"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "every": {
+             "anyOf": [
+              {
+               "pattern": "^([0-9]{1,10}[smhdw] ?)+$",
+               "type": "string"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            }
+           },
+           "type": "object"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "initial_value": {
+         "anyOf": [
+          {
+           "maximum": 2147483647,
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "per_channel": {
+         "anyOf": [
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "per_user": {
+         "anyOf": [
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "triggers": {
+         "anyOf": [
+          {
+           "additionalProperties": {
+            "anyOf": [
+             {
+              "allOf": [
+               {
+                "anyOf": [
+                 {
+                  "pattern": "^\\s*(>=|<=|!=|>|<|=)\\s*[0-9]{1,10}\\s*$",
+                  "type": "string"
+                 },
+                 {
+                  "additionalProperties": {
+                   "type": "null"
+                  },
+                  "properties": {
+                   "condition": {
+                    "anyOf": [
+                     {
+                      "pattern": "^\\s*(>=|<=|!=|>|<|=)\\s*[0-9]{1,10}\\s*$",
+                      "type": "string"
+                     },
+                     {
+                      "type": "null"
+                     }
+                    ]
+                   },
+                   "reverse_condition": {
+                    "anyOf": [
+                     {
+                      "pattern": "^\\s*(>=|<=|!=|>|<|=)\\s*[0-9]{1,10}\\s*$",
+                      "type": "string"
+                     },
+                     {
+                      "type": "null"
+                     }
+                    ]
+                   }
+                  },
+                  "type": "object"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "type": "object"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "description": "カウンター。名前で区別し、ルールが加算・設定・参照する数値。",
+    "type": "object"
+   },
+   {
+    "type": "null"
+   }
+  ]
+ },
+ "antiraid": {
+  "anyOf": [
+   {
+    "additionalProperties": {
+     "type": "null"
+    },
+    "description": "アンレイド: レイド中にサーバーを引き上げるレベル。省くと、アンレイドは無効です。",
+    "properties": {
+     "effects": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "anyOf": [
+          {
+           "additionalProperties": {
+            "type": "null"
+           },
+           "properties": {
+            "notify_channel": {
+             "anyOf": [
+              {
+               "description": "レベルが変わったときに知らせるチャンネル。",
+               "pattern": "^[0-9]{1,20}$",
+               "type": "string"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "pause_invites": {
+             "anyOf": [
+              {
+               "description": "レベルが続いている間、新しい招待を止めるかどうか。",
+               "type": "boolean"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "quarantine": {
+             "anyOf": [
+              {
+               "additionalProperties": {
+                "type": "null"
+               },
+               "properties": {
+                "marker_role": {
+                 "anyOf": [
+                  {
+                   "pattern": "^[0-9]{1,20}$",
+                   "type": "string"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                },
+                "role": {
+                 "anyOf": [
+                  {
+                   "description": "サーバーのロール。省くと、Closure が作るロールを使います。",
+                   "pattern": "^[0-9]{1,20}$",
+                   "type": "string"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                }
+               },
+               "type": "object"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            },
+            "slowmode": {
+             "anyOf": [
+              {
+               "additionalProperties": {
+                "type": "null"
+               },
+               "properties": {
+                "channels": {
+                 "anyOf": [
+                  {
+                   "description": "低速モードにするチャンネル。空ならサーバーのすべてのテキストチャンネルです。",
+                   "items": {
+                    "pattern": "^[0-9]{1,20}$",
+                    "type": "string"
+                   },
+                   "maxItems": 100,
+                   "type": "array"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                },
+                "seconds": {
+                 "anyOf": [
+                  {
+                   "maximum": 21600,
+                   "minimum": 0,
+                   "type": "integer"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                }
+               },
+               "type": "object"
+              },
+              {
+               "type": "null"
+              }
+             ]
+            }
+           },
+           "type": "object"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "description": "各レベルの動作。レベル名で区別します。項目がないレベルは何もしません。",
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "levels": {
+      "anyOf": [
+       {
+        "description": "レベル。最初のものが通常のレベルです。既定は none、low、medium、high、lockdown。",
+        "items": {
+         "pattern": "^[a-z0-9_-]{1,32}$",
+         "type": "string"
+        },
+        "maxItems": 10,
+        "minItems": 2,
+        "type": "array",
+        "uniqueItems": true
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "quarantine_release": {
+      "anyOf": [
+       {
+        "const": false,
+        "description": "予約: 隔離は、レベルが下がったときではなく、モデレーターが解除します。"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": [
+     "object",
+     "null"
+    ],
+    "x-ui": {
+     "level": "advanced"
+    }
+   },
+   {
+    "type": "null"
+   }
+  ]
+ }
+}

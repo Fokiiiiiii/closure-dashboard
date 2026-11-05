@@ -42,7 +42,7 @@ pub(super) async fn load(app: &App, id: &str, language: &str) -> Result<Data, Ap
     })
 }
 
-fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Response {
+pub(super) fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Response {
     let l = lang(headers, app);
     let key = match error.status {
         StatusCode::FORBIDDEN => keys::DENIED,
@@ -68,7 +68,7 @@ fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Re
 /// Whether the input `name` belongs to `field`: it is the field, or a cell of its rows.
 fn in_field(field: &form::Field, name: &str) -> bool {
     name == field.name
-        || (matches!(field.kind, form::Kind::List(_) | form::Kind::Entries { .. })
+        || (matches!(field.kind, form::Kind::List(_) | form::Kind::Entries)
             && name
                 .strip_prefix(field.name.as_str())
                 .is_some_and(|rest| rest.starts_with('.')))
@@ -89,9 +89,32 @@ pub(super) fn return_path(app: &App, headers: &HeaderMap, id: &str) -> String {
         .unwrap_or_else(|| format!("/g/{id}/modules"))
 }
 
-fn conflict(app: &App, headers: &HeaderMap, id: &str, module: &str) -> Response {
+pub(super) fn conflict(
+    app: &App,
+    headers: &HeaderMap,
+    id: &str,
+    module: &str,
+    part: &str,
+) -> Response {
     let l = lang(headers, app);
-    (StatusCode::PRECONDITION_FAILED, Html(views::shell(l, headers, id, id, keys::MODULES, &format!("<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"/g/{}/modules/{}\">{}</a>", l.text(keys::CONFLICT_RELOAD), escape(id), escape(module), l.text(keys::RELOAD)), true))).into_response()
+    (
+        StatusCode::PRECONDITION_FAILED,
+        Html(views::shell(
+            l,
+            headers,
+            id,
+            id,
+            keys::MODULES,
+            &format!(
+                "<p role=\"alert\">{}</p><a class=\"button secondary\" href=\"{}\">{}</a>",
+                l.text(keys::CONFLICT_RELOAD),
+                escape(&views::part_path(id, module, part)),
+                l.text(keys::RELOAD)
+            ),
+            true,
+        )),
+    )
+        .into_response()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -100,6 +123,7 @@ fn render(
     headers: &HeaderMap,
     id: &str,
     module: &str,
+    part: &str,
     data: &Data,
     input: &HashMap<String, String>,
     errors: &HashMap<String, Vec<String>>,
@@ -115,10 +139,25 @@ fn render(
             headers,
         );
     };
+    let fields = form::fields(schema);
+    let parts = form::parts(module, &fields);
+    if part.is_empty() && !parts.is_empty() && !parts.contains(&"") {
+        return Redirect::to(&views::part_path(id, module, parts[0])).into_response();
+    }
+    if !(parts.contains(&part) || part.is_empty() && parts.is_empty()) || form::is_editor_part(part)
+    {
+        return error_page(
+            StatusCode::NOT_FOUND,
+            lang(headers, app),
+            keys::NOTFOUND,
+            headers,
+        );
+    }
     let page = views::FormPage {
         id,
         guild: guild_name(&data.guilds, id),
         module,
+        part,
         schema,
         stored: &data.stored,
         effective: &data.effective,
@@ -161,6 +200,26 @@ pub(super) async fn edit(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+    edit_part(
+        State(app),
+        Path((id, module, String::new())),
+        headers,
+        Query(query),
+    )
+    .await
+}
+
+pub(super) async fn edit_part(
+    State(app): State<App>,
+    Path((id, module, part)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let part = part.as_str();
+    if form::is_editor_part(part) {
+        let saved = query.get("saved").is_some_and(|v| v == "1");
+        return super::editor::list(&app, &headers, &id, &module, part, saved).await;
+    }
     let l = lang(&headers, &app);
     match load(&app, &id, l.bot_language()).await {
         Ok(data) => render(
@@ -168,6 +227,7 @@ pub(super) async fn edit(
             &headers,
             &id,
             &module,
+            part,
             &data,
             &HashMap::new(),
             &HashMap::new(),
@@ -178,13 +238,30 @@ pub(super) async fn edit(
     }
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) async fn save(
     State(app): State<App>,
     Path((id, module)): Path<(String, String)>,
     headers: HeaderMap,
+    form: axum::Form<Vec<(String, String)>>,
+) -> Response {
+    save_part(State(app), Path((id, module, String::new())), headers, form).await
+}
+
+#[allow(clippy::too_many_lines)]
+pub(super) async fn save_part(
+    State(app): State<App>,
+    Path((id, module, part)): Path<(String, String, String)>,
+    headers: HeaderMap,
     axum::Form(pairs): axum::Form<Vec<(String, String)>>,
 ) -> Response {
+    let part = part.as_str();
+    if form::is_editor_part(part) {
+        return if part == "antiraid" {
+            super::editor::save_item(&app, &headers, &id, &module, part, "", pairs).await
+        } else {
+            super::editor::list_save(&app, &headers, &id, &module, part, pairs).await
+        };
+    }
     let l = lang(&headers, &app);
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
@@ -225,7 +302,7 @@ pub(super) async fn save(
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     if etag != data.etag {
-        return conflict(&app, &headers, &id, &module);
+        return conflict(&app, &headers, &id, &module, part);
     }
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
@@ -236,13 +313,13 @@ pub(super) async fn save(
                 form::rows(field, columns, &input).ok_or_else(|| l.text(keys::FIELD_INVALID)),
                 Value::Array(Vec::new()),
             ),
-            form::Kind::Entries { json } => (
-                form::entries(field, *json, &input),
+            form::Kind::Entries => (
+                form::entries(field, &input),
                 Value::Object(serde_json::Map::new()),
             ),
             _ => (Err(String::new()), Value::Null),
         };
-        if matches!(field.kind, form::Kind::List(_) | form::Kind::Entries { .. }) {
+        if matches!(field.kind, form::Kind::List(_) | form::Kind::Entries) {
             if input.keys().any(|name| in_field(field, name)) {
                 match read {
                     Ok(value) => {
@@ -279,8 +356,7 @@ pub(super) async fn save(
             }
         }
         let Some(value) = form::parse(field, value) else {
-            let message = form::reason(field, value).unwrap_or_else(|| l.text(keys::FIELD_INVALID));
-            errors.insert(field.name.clone(), vec![message]);
+            errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
             continue;
         };
         let stored = data.stored["modules"][&module]["config"].get(&field.name);
@@ -295,6 +371,7 @@ pub(super) async fn save(
             &headers,
             &id,
             &module,
+            part,
             &data,
             &input,
             &errors,
@@ -310,9 +387,10 @@ pub(super) async fn save(
         .put_basic_config(&id, data.stored.clone(), &etag, &actor)
         .await
     {
-        Ok(_) => Redirect::to(&format!("/g/{id}/modules/{module}?saved=1")).into_response(),
+        Ok(_) => Redirect::to(&format!("{}?saved=1", views::part_path(&id, &module, part)))
+            .into_response(),
         Err(e) if e.status == StatusCode::PRECONDITION_FAILED => {
-            conflict(&app, &headers, &id, &module)
+            conflict(&app, &headers, &id, &module, part)
         }
         Err(e) if e.status == StatusCode::UNPROCESSABLE_ENTITY => {
             for issue in e.issues {
@@ -322,10 +400,8 @@ pub(super) async fn save(
                         let path = format!("modules.{module}.config.{}", f.name);
                         issue.path == f.name
                             || issue.path == path
-                            || (matches!(
-                                f.kind,
-                                form::Kind::List(_) | form::Kind::Entries { .. } | form::Kind::Json
-                            ) && issue.path.starts_with(&path))
+                            || (matches!(f.kind, form::Kind::List(_) | form::Kind::Entries)
+                                && issue.path.starts_with(&path))
                     })
                     .map_or_else(String::new, |f| f.name.clone());
                 errors
@@ -341,6 +417,7 @@ pub(super) async fn save(
                 &headers,
                 &id,
                 &module,
+                part,
                 &data,
                 &input,
                 &errors,

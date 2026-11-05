@@ -12,12 +12,10 @@ pub enum Kind {
     Words,
     /// `false`, `true`, or role ids told apart by commas.
     FlagOrRoles,
-    /// A whole object, written as JSON.
-    Json,
-    /// Named entries, one row each; their values are texts, or JSON when `json` is set.
-    Entries {
-        json: bool,
-    },
+    /// A setting with pages of its own in the structured editor: rules, counters, anti-raid.
+    Structured,
+    /// Named entries, one row each, with a text as the value.
+    Entries,
     /// Rows of one fixed shape, such as the rules of a channel setting.
     List(Vec<Column>),
 }
@@ -161,6 +159,44 @@ pub fn section(module: &str, field: &str) -> &'static str {
     }
 }
 
+/// The page of a module a field belongs to: `""` is the module's main page, and every other
+/// part of a big module (its escalation, its rules, its anti-raid...) is a page of its own.
+#[must_use]
+pub fn part_of(module: &str, field: &str) -> &'static str {
+    match section(module, field) {
+        "warn" | "timeout" | "voice" | "ban" | "behavior" | "destination" | "events" | "roles"
+        | "other" => "",
+        part => part,
+    }
+}
+
+/// Whether a part is edited with the structured editor (rules, counters, anti-raid) rather than
+/// with a flat form.
+#[must_use]
+pub fn is_editor_part(part: &str) -> bool {
+    matches!(part, "rules" | "counters" | "antiraid")
+}
+
+/// The parts of a module in the order shown, each with the fields it holds.
+#[must_use]
+pub fn parts(module: &str, fields: &[Field]) -> Vec<&'static str> {
+    let mut parts: Vec<&'static str> = Vec::new();
+    for field in fields {
+        let part = part_of(module, &field.name);
+        if !parts.contains(&part) {
+            parts.push(part);
+        }
+    }
+    parts.sort_by_key(|part| {
+        if part.is_empty() {
+            0
+        } else {
+            section_rank(part) + 1
+        }
+    });
+    parts
+}
+
 #[must_use]
 pub fn dependency(module: &str, field: &str) -> Option<(&'static str, &'static str)> {
     if !matches!(module, "moderation" | "automod") {
@@ -302,12 +338,10 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         });
     let kind = if widget == Some("flag-or-roles") {
         Kind::FlagOrRoles
-    } else if widget == Some("json") {
-        Kind::Json
-    } else if widget == Some("entries") || widget == Some("entries-json") {
-        Kind::Entries {
-            json: widget == Some("entries-json"),
-        }
+    } else if matches!(widget, Some("json" | "entries-json")) {
+        Kind::Structured
+    } else if widget == Some("entries") {
+        Kind::Entries
     } else if ty == "boolean" {
         Kind::Boolean
     } else if ty == "integer"
@@ -352,7 +386,7 @@ fn field(name: &str, value: &Value) -> Option<Field> {
 }
 
 // shortcut: only anchored character classes are checked here; any other syntax passes because the bot validates on save.
-fn pattern_matches(pattern: &str, value: &str) -> bool {
+pub(crate) fn pattern_matches(pattern: &str, value: &str) -> bool {
     let Some(mut body) = pattern.strip_prefix('^').and_then(|p| p.strip_suffix('$')) else {
         return true;
     };
@@ -441,8 +475,7 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
-        Kind::List(_) | Kind::Entries { .. } => None,
-        Kind::Json => json_object(input).ok(),
+        Kind::List(_) | Kind::Entries | Kind::Structured => None,
         Kind::FlagOrRoles => match input.trim() {
             "true" => Some(json!(true)),
             "false" => Some(json!(false)),
@@ -528,35 +561,13 @@ pub fn is_preset(kind: &Kind) -> bool {
     matches!(kind, Kind::Boolean | Kind::Enum(_))
 }
 
-/// A JSON object written as text; the error says where the text is wrong.
-///
-/// # Errors
-/// Returns the reason when the text is not a JSON object.
-pub fn json_object(text: &str) -> Result<Value, String> {
-    match serde_json::from_str::<Value>(text) {
-        Ok(value) if value.is_object() => Ok(value),
-        Ok(_) => Err("must be an object".to_owned()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-/// Why a field's text cannot be read, when the reader can tell; `None` for the plain refusal.
-#[must_use]
-pub fn reason(field: &Field, input: &str) -> Option<String> {
-    match field.kind {
-        Kind::Json if !input.is_empty() => json_object(input).err(),
-        _ => None,
-    }
-}
-
 /// The entries of a field of named entries, read from the inputs `<field>.<row>.k` (the name) and
 /// `<field>.<row>.v` (the value). A row ticked for removal (`.x`) or left empty is dropped.
 ///
 /// # Errors
-/// Returns the reason when an entry cannot be read: a repeated name, or a value that is not JSON.
+/// Returns the reason when an entry cannot be read: a repeated name, or a missing one.
 pub fn entries<S: std::hash::BuildHasher>(
     field: &Field,
-    json: bool,
     input: &HashMap<String, String, S>,
 ) -> Result<Value, String> {
     let prefix = format!("{}.", field.name);
@@ -580,13 +591,10 @@ pub fn entries<S: std::hash::BuildHasher>(
         if key.is_empty() {
             return Err("a name is missing".to_owned());
         }
-        let value = if json {
-            json_object(text).map_err(|reason| format!("{key}: {reason}"))?
-        } else if text.is_empty() {
+        if text.is_empty() {
             continue;
-        } else {
-            json!(text.replace("\r\n", "\n"))
-        };
+        }
+        let value = json!(text.replace("\r\n", "\n"));
         if map.insert(key.to_owned(), value).is_some() {
             return Err(format!("{key}: repeated"));
         }
@@ -926,58 +934,35 @@ mod tests {
     }
 
     #[test]
-    fn named_entries_are_read_row_by_row() {
-        let field = entries_field("entries-json");
-        assert_eq!(field.kind, Kind::Entries { json: true });
-        let input = typed(&[
-            ("rules.0.k", "spam"),
-            ("rules.0.v", r#"{"enabled": true}"#),
-            ("rules.1.k", "old"),
-            ("rules.1.v", "{}"),
-            ("rules.1.x", "1"),
-            ("rules.2.k", ""),
-            ("rules.2.v", ""),
-        ]);
-        assert_eq!(
-            entries(&field, true, &input),
-            Ok(json!({"spam": {"enabled": true}}))
-        );
-        let broken = typed(&[("rules.0.k", "spam"), ("rules.0.v", "{")]);
-        assert!(
-            entries(&field, true, &broken)
-                .unwrap_err()
-                .starts_with("spam: ")
-        );
-        let repeated = typed(&[
-            ("rules.0.k", "a"),
-            ("rules.0.v", "{}"),
-            ("rules.1.k", "a"),
-            ("rules.1.v", "{}"),
-        ]);
-        assert_eq!(entries(&field, true, &repeated), Err("a: repeated".into()));
-        let nameless = typed(&[("rules.0.v", "{}")]);
-        assert!(entries(&field, true, &nameless).is_err());
-    }
-
-    #[test]
-    fn text_entries_drop_empty_values_and_keep_plain_line_feeds() {
+    fn named_texts_are_read_row_by_row() {
         let field = entries_field("entries");
+        assert_eq!(field.kind, Kind::Entries);
         let input = typed(&[
             ("rules.0.k", "done"),
             ("rules.0.v", "a\r\nb"),
             ("rules.1.k", "empty"),
             ("rules.1.v", ""),
+            ("rules.2.k", "old"),
+            ("rules.2.v", "x"),
+            ("rules.2.x", "1"),
+            ("rules.3.k", ""),
+            ("rules.3.v", ""),
         ]);
-        assert_eq!(entries(&field, false, &input), Ok(json!({"done": "a\nb"})));
+        assert_eq!(entries(&field, &input), Ok(json!({"done": "a\nb"})));
+        let repeated = typed(&[
+            ("rules.0.k", "a"),
+            ("rules.0.v", "x"),
+            ("rules.1.k", "a"),
+            ("rules.1.v", "y"),
+        ]);
+        assert_eq!(entries(&field, &repeated), Err("a: repeated".into()));
+        assert!(entries(&field, &typed(&[("rules.0.v", "x")])).is_err());
     }
 
     #[test]
-    fn a_json_field_takes_objects_only_and_a_role_setting_takes_flags_or_ids() {
-        let json_field = entries_field("json");
-        assert_eq!(json_field.kind, Kind::Json);
-        assert_eq!(parse(&json_field, r#"{"a": 1}"#), Some(json!({"a": 1})));
-        assert_eq!(parse(&json_field, "[1]"), None);
-        assert!(reason(&json_field, "{").is_some());
+    fn a_setting_with_its_own_pages_is_not_a_form_field_and_a_role_setting_takes_flags_or_ids() {
+        assert_eq!(entries_field("json").kind, Kind::Structured);
+        assert_eq!(entries_field("entries-json").kind, Kind::Structured);
         let roles = entries_field("flag-or-roles");
         assert_eq!(parse(&roles, "true"), Some(json!(true)));
         assert_eq!(parse(&roles, " false "), Some(json!(false)));
