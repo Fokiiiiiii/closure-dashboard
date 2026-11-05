@@ -68,7 +68,7 @@ fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Re
 /// Whether the input `name` belongs to `field`: it is the field, or a cell of its rows.
 fn in_field(field: &form::Field, name: &str) -> bool {
     name == field.name
-        || (matches!(field.kind, form::Kind::List(_))
+        || (matches!(field.kind, form::Kind::List(_) | form::Kind::Entries { .. })
             && name
                 .strip_prefix(field.name.as_str())
                 .is_some_and(|rest| rest.starts_with('.')))
@@ -230,14 +230,24 @@ pub(super) async fn save(
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
     for field in &fields {
-        if let form::Kind::List(columns) = &field.kind {
+        // A list or a set of entries that is not in the default configuration is an empty one.
+        let (read, empty) = match &field.kind {
+            form::Kind::List(columns) => (
+                form::rows(field, columns, &input).ok_or_else(|| l.text(keys::FIELD_INVALID)),
+                Value::Array(Vec::new()),
+            ),
+            form::Kind::Entries { json } => (
+                form::entries(field, *json, &input),
+                Value::Object(serde_json::Map::new()),
+            ),
+            _ => (Err(String::new()), Value::Null),
+        };
+        if matches!(field.kind, form::Kind::List(_) | form::Kind::Entries { .. }) {
             if input.keys().any(|name| in_field(field, name)) {
-                match form::rows(field, columns, &input) {
-                    Some(value) => {
+                match read {
+                    Ok(value) => {
                         let config = &data.stored["modules"][&module]["config"];
                         let effective = &data.effective["modules"][&module]["config"];
-                        // A list that is not in the default configuration is an empty one.
-                        let empty = Value::Array(Vec::new());
                         if form::should_write(
                             &value,
                             form::lookup(config, &field.name),
@@ -246,8 +256,8 @@ pub(super) async fn save(
                             changes.insert(field.name.clone(), value);
                         }
                     }
-                    None => {
-                        errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
+                    Err(message) => {
+                        errors.insert(field.name.clone(), vec![message]);
                     }
                 }
             }
@@ -269,7 +279,8 @@ pub(super) async fn save(
             }
         }
         let Some(value) = form::parse(field, value) else {
-            errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
+            let message = form::reason(field, value).unwrap_or_else(|| l.text(keys::FIELD_INVALID));
+            errors.insert(field.name.clone(), vec![message]);
             continue;
         };
         let stored = data.stored["modules"][&module]["config"].get(&field.name);
@@ -311,8 +322,10 @@ pub(super) async fn save(
                         let path = format!("modules.{module}.config.{}", f.name);
                         issue.path == f.name
                             || issue.path == path
-                            || (matches!(f.kind, form::Kind::List(_))
-                                && issue.path.starts_with(&path))
+                            || (matches!(
+                                f.kind,
+                                form::Kind::List(_) | form::Kind::Entries { .. } | form::Kind::Json
+                            ) && issue.path.starts_with(&path))
                     })
                     .map_or_else(String::new, |f| f.name.clone());
                 errors

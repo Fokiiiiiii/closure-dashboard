@@ -10,6 +10,14 @@ pub enum Kind {
     Roles,
     /// Texts told apart by commas, such as the emojis of a rule.
     Words,
+    /// `false`, `true`, or role ids told apart by commas.
+    FlagOrRoles,
+    /// A whole object, written as JSON.
+    Json,
+    /// Named entries, one row each; their values are texts, or JSON when `json` is set.
+    Entries {
+        json: bool,
+    },
     /// Rows of one fixed shape, such as the rules of a channel setting.
     List(Vec<Column>),
 }
@@ -113,11 +121,13 @@ pub struct Field {
 pub fn section_rank(section: &str) -> usize {
     match section {
         "warn" | "behavior" | "destination" | "auto_delete" => 0,
-        "timeout" | "events" | "auto_react" => 1,
-        "voice" => 2,
-        "ban" => 3,
+        "timeout" | "events" | "auto_react" | "rules" => 1,
+        "voice" | "counters" => 2,
+        "ban" | "antiraid" => 3,
         "escalation" => 4,
         "templates" => 5,
+        "messages" => 7,
+        "texts" => 8,
         _ => 9,
     }
 }
@@ -126,15 +136,23 @@ pub fn section_rank(section: &str) -> usize {
 #[must_use]
 pub fn section(module: &str, field: &str) -> &'static str {
     match (module, field) {
+        ("moderation" | "automod" | "logs" | "channels", "replies" | "texts") => "texts",
         ("moderation", "warn_expire_days" | "require_reason" | "dm_on_action") => "warn",
         ("moderation", "timeout_method" | "timeout_role") => "timeout",
         ("moderation", "voice_mute_method" | "voice_mute_role") => "voice",
         ("moderation", "ban_delete_days") => "ban",
-        ("automod", "dry_run" | "dm_on_action" | "warn_expire_days") => "behavior",
+        (
+            "automod",
+            "dry_run" | "dm_on_action" | "warn_expire_days" | "timeout_method" | "timeout_role",
+        ) => "behavior",
         ("logs", "channel" | "webhook") => "destination",
         ("logs", _) => "events",
         ("channels", "auto_delete") => "auto_delete",
         ("channels", "auto_react") => "auto_react",
+        ("automod", "rules") => "rules",
+        ("automod", "counters") => "counters",
+        ("automod", "antiraid") => "antiraid",
+        ("moderation" | "automod", name) if name.starts_with("dm_messages.") => "messages",
         ("moderation", "escalation") => "escalation",
         ("moderation", name) if name.starts_with("templates.") => "templates",
         _ => "other",
@@ -143,7 +161,7 @@ pub fn section(module: &str, field: &str) -> &'static str {
 
 #[must_use]
 pub fn dependency(module: &str, field: &str) -> Option<(&'static str, &'static str)> {
-    if module != "moderation" {
+    if !matches!(module, "moderation" | "automod") {
         return None;
     }
     match field {
@@ -252,19 +270,16 @@ pub fn fields(module: &Value) -> Vec<Field> {
         .collect()
 }
 
-/// A property that is an object of lists shows as one list per member, named `property.member`.
+/// A property that is an object of lists or of texts shows as one field per member, named
+/// `property.member`.
 fn nested_lists(name: &str, value: &Value) -> Option<Vec<Field>> {
     let schema = non_null(value)?;
-    let members = schema["properties"]
-        .as_object()
-        .filter(|members| !members.is_empty() && schema["type"] == "object")?;
+    let members = schema["properties"].as_object().filter(|members| {
+        !members.is_empty() && schema["type"] == "object" && schema["x-ui"]["widget"].is_null()
+    })?;
     members
         .iter()
-        .map(|(member, value)| {
-            let value = non_null(value)?;
-            (value["type"] == "array").then_some(())?;
-            field(&format!("{name}.{member}"), &value)
-        })
+        .map(|(member, value)| field(&format!("{name}.{member}"), value))
         .collect()
 }
 
@@ -278,11 +293,20 @@ pub fn lookup<'a>(config: &'a Value, name: &str) -> Option<&'a Value> {
 fn field(name: &str, value: &Value) -> Option<Field> {
     let schema = non_null(value)?;
     let ty = &schema["type"];
+    let widget = schema["x-ui"]["widget"].as_str();
     let string = ty == "string"
         || ty.as_array().is_some_and(|a| {
             a.len() == 2 && a.contains(&json!("string")) && a.contains(&json!("null"))
         });
-    let kind = if ty == "boolean" {
+    let kind = if widget == Some("flag-or-roles") {
+        Kind::FlagOrRoles
+    } else if widget == Some("json") {
+        Kind::Json
+    } else if widget == Some("entries") || widget == Some("entries-json") {
+        Kind::Entries {
+            json: widget == Some("entries-json"),
+        }
+    } else if ty == "boolean" {
         Kind::Boolean
     } else if ty == "integer"
         && schema["minimum"].as_i64().is_some()
@@ -415,7 +439,25 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
-        Kind::List(_) => None,
+        Kind::List(_) | Kind::Entries { .. } => None,
+        Kind::Json => json_object(input).ok(),
+        Kind::FlagOrRoles => match input.trim() {
+            "true" => Some(json!(true)),
+            "false" => Some(json!(false)),
+            text => {
+                let ids: Vec<_> = text
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .collect();
+                (!ids.is_empty()
+                    && ids.len() <= 50
+                    && ids.iter().all(|v| {
+                        (1..=20).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_digit())
+                    }))
+                .then(|| json!(ids))
+            }
+        },
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -482,6 +524,72 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
 #[must_use]
 pub fn is_preset(kind: &Kind) -> bool {
     matches!(kind, Kind::Boolean | Kind::Enum(_))
+}
+
+/// A JSON object written as text; the error says where the text is wrong.
+///
+/// # Errors
+/// Returns the reason when the text is not a JSON object.
+pub fn json_object(text: &str) -> Result<Value, String> {
+    match serde_json::from_str::<Value>(text) {
+        Ok(value) if value.is_object() => Ok(value),
+        Ok(_) => Err("must be an object".to_owned()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Why a field's text cannot be read, when the reader can tell; `None` for the plain refusal.
+#[must_use]
+pub fn reason(field: &Field, input: &str) -> Option<String> {
+    match field.kind {
+        Kind::Json if !input.is_empty() => json_object(input).err(),
+        _ => None,
+    }
+}
+
+/// The entries of a field of named entries, read from the inputs `<field>.<row>.k` (the name) and
+/// `<field>.<row>.v` (the value). A row ticked for removal (`.x`) or left empty is dropped.
+///
+/// # Errors
+/// Returns the reason when an entry cannot be read: a repeated name, or a value that is not JSON.
+pub fn entries<S: std::hash::BuildHasher>(
+    field: &Field,
+    json: bool,
+    input: &HashMap<String, String, S>,
+) -> Result<Value, String> {
+    let prefix = format!("{}.", field.name);
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    let mut map = Map::new();
+    for number in numbers {
+        let cell = |part: &str| {
+            input
+                .get(&format!("{prefix}{number}.{part}"))
+                .map_or("", |v| v.trim())
+        };
+        if cell("x") == "1" || (cell("k").is_empty() && cell("v").is_empty()) {
+            continue;
+        }
+        let (key, text) = (cell("k"), cell("v"));
+        if key.is_empty() {
+            return Err("a name is missing".to_owned());
+        }
+        let value = if json {
+            json_object(text).map_err(|reason| format!("{key}: {reason}"))?
+        } else if text.is_empty() {
+            continue;
+        } else {
+            json!(text.replace("\r\n", "\n"))
+        };
+        if map.insert(key.to_owned(), value).is_some() {
+            return Err(format!("{key}: repeated"));
+        }
+    }
+    Ok(Value::Object(map))
 }
 
 /// The rows of a list field, read from the inputs named `<field>.<row>.<column>`.
@@ -795,6 +903,94 @@ mod tests {
         );
         assert_eq!(lookup(config, "templates.ban"), Some(&json!([{"id": "a"}])));
         assert_eq!(lookup(config, "templates.vcmute"), None);
+    }
+
+    fn entries_field(widget: &str) -> Field {
+        let module = json!({"properties": {"config": {"properties": {"rules": {
+            "type": "object", "x-ui": {"widget": widget}
+        }}}}});
+        fields(&module).remove(0)
+    }
+
+    fn typed(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn named_entries_are_read_row_by_row() {
+        let field = entries_field("entries-json");
+        assert_eq!(field.kind, Kind::Entries { json: true });
+        let input = typed(&[
+            ("rules.0.k", "spam"),
+            ("rules.0.v", r#"{"enabled": true}"#),
+            ("rules.1.k", "old"),
+            ("rules.1.v", "{}"),
+            ("rules.1.x", "1"),
+            ("rules.2.k", ""),
+            ("rules.2.v", ""),
+        ]);
+        assert_eq!(
+            entries(&field, true, &input),
+            Ok(json!({"spam": {"enabled": true}}))
+        );
+        let broken = typed(&[("rules.0.k", "spam"), ("rules.0.v", "{")]);
+        assert!(
+            entries(&field, true, &broken)
+                .unwrap_err()
+                .starts_with("spam: ")
+        );
+        let repeated = typed(&[
+            ("rules.0.k", "a"),
+            ("rules.0.v", "{}"),
+            ("rules.1.k", "a"),
+            ("rules.1.v", "{}"),
+        ]);
+        assert_eq!(entries(&field, true, &repeated), Err("a: repeated".into()));
+        let nameless = typed(&[("rules.0.v", "{}")]);
+        assert!(entries(&field, true, &nameless).is_err());
+    }
+
+    #[test]
+    fn text_entries_drop_empty_values_and_keep_plain_line_feeds() {
+        let field = entries_field("entries");
+        let input = typed(&[
+            ("rules.0.k", "done"),
+            ("rules.0.v", "a\r\nb"),
+            ("rules.1.k", "empty"),
+            ("rules.1.v", ""),
+        ]);
+        assert_eq!(entries(&field, false, &input), Ok(json!({"done": "a\nb"})));
+    }
+
+    #[test]
+    fn a_json_field_takes_objects_only_and_a_role_setting_takes_flags_or_ids() {
+        let json_field = entries_field("json");
+        assert_eq!(json_field.kind, Kind::Json);
+        assert_eq!(parse(&json_field, r#"{"a": 1}"#), Some(json!({"a": 1})));
+        assert_eq!(parse(&json_field, "[1]"), None);
+        assert!(reason(&json_field, "{").is_some());
+        let roles = entries_field("flag-or-roles");
+        assert_eq!(parse(&roles, "true"), Some(json!(true)));
+        assert_eq!(parse(&roles, " false "), Some(json!(false)));
+        assert_eq!(parse(&roles, "1, 22"), Some(json!(["1", "22"])));
+        assert_eq!(parse(&roles, "x"), None);
+        assert_eq!(parse(&roles, "+1"), None);
+    }
+
+    #[test]
+    fn an_object_of_texts_shows_one_field_per_member() {
+        let text = json!({"type": "string", "maxLength": 1500});
+        let module = json!({"properties": {"config": {"properties": {"dm_messages": {
+            "type": "object", "properties": {"warn": text, "ban": text}
+        }}}}});
+        let names: Vec<_> = fields(&module).into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["dm_messages.ban", "dm_messages.warn"]);
+        assert_eq!(section("automod", "dm_messages.ban"), "messages");
+        assert_eq!(section("logs", "replies"), "texts");
+        assert_eq!(section("welcome", "texts"), "other");
     }
 
     #[test]

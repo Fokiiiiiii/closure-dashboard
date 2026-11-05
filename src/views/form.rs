@@ -43,6 +43,11 @@ fn section_title(l: Locale<'_>, key: &str) -> String {
         "auto_react" => keys::SEC_AUTO_REACT,
         "escalation" => keys::SEC_ESCALATION,
         "templates" => keys::SEC_TEMPLATES,
+        "rules" => keys::SEC_RULES,
+        "counters" => keys::SEC_COUNTERS,
+        "antiraid" => keys::SEC_ANTIRAID,
+        "messages" => keys::SEC_MESSAGES,
+        "texts" => keys::SEC_TEXTS,
         "behavior" => keys::SEC_BEHAVIOR,
         "destination" => keys::SEC_DESTINATION,
         "events" => keys::SEC_EVENTS,
@@ -194,8 +199,12 @@ pub(super) fn control(
                 escape(value)
             )
         }
-        Kind::List(_) => String::new(),
-        Kind::String | Kind::Roles | Kind::Words => {
+        Kind::List(_) | Kind::Entries { .. } => String::new(),
+        Kind::Json => format!(
+            "<textarea {attrs} class=\"json\" rows=\"12\" spellcheck=\"false\">{}</textarea>",
+            escape(value)
+        ),
+        Kind::String | Kind::Roles | Kind::Words | Kind::FlagOrRoles => {
             let pattern = field.schema["pattern"]
                 .as_str()
                 .map_or_else(String::new, |v| format!(" pattern=\"{}\"", escape(v)));
@@ -226,6 +235,102 @@ fn column_title(l: Locale<'_>, name: &str) -> String {
         "reason" => keys::COL_REASON,
         _ => return escape(name),
     })
+}
+
+/// One row per named entry, and one empty row to add the next. The value of an entry is a text, or
+/// JSON when `json` is set. After a refused save the rows come back as they were typed.
+fn entries_editor(
+    l: Locale<'_>,
+    field: &Field,
+    json: bool,
+    current: &Value,
+    input: &HashMap<String, String>,
+) -> String {
+    let prefix = format!("{}.", field.name);
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    // (name, value, ticked for removal)
+    let mut rows: Vec<(String, String, bool)> = if numbers.is_empty() {
+        current
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(name, value)| {
+                let text = match value {
+                    Value::String(text) => text.clone(),
+                    value if json => serde_json::to_string_pretty(value).unwrap_or_default(),
+                    value => value.to_string(),
+                };
+                (name.clone(), text, false)
+            })
+            .collect()
+    } else {
+        numbers
+            .iter()
+            .map(|n| {
+                let get = |part: &str| input.get(&format!("{prefix}{n}.{part}")).cloned();
+                (
+                    get("k").unwrap_or_default(),
+                    get("v").unwrap_or_default(),
+                    get("x").is_some_and(|v| v == "1"),
+                )
+            })
+            .collect()
+    };
+    rows.retain(|(name, value, removed)| *removed || !name.is_empty() || !value.is_empty());
+    let existing = rows.len();
+    if (rows.len() as u64) < field.schema["maxProperties"].as_u64().unwrap_or(100) {
+        rows.push((String::new(), String::new(), false));
+    }
+    let pattern = field.schema["propertyNames"]["pattern"]
+        .as_str()
+        .map_or_else(String::new, |p| format!(" pattern=\"{}\"", escape(p)));
+    let (key_title, value_title) = entry_titles(l, &field.name, json);
+    let mut out = String::from("<div class=\"list-editor\">");
+    for (row, (name, value, removed)) in rows.iter().enumerate() {
+        let cell = |part: &str| escape(&format!("f.{prefix}{row}.{part}"));
+        let (rows_attr, class) = if json {
+            (12, " class=\"json\"")
+        } else {
+            (2, "")
+        };
+        let _ = write!(
+            out,
+            "<div class=\"list-row\"><label class=\"list-cell list-key\"><span class=\"list-caption\">{key_title}</span><input type=\"text\" name=\"{}\" value=\"{}\" maxlength=\"64\"{pattern}></label><label class=\"list-cell list-value\"><span class=\"list-caption\">{value_title}</span><textarea name=\"{}\" rows=\"{rows_attr}\"{class} spellcheck=\"false\">{}</textarea></label>",
+            cell("k"),
+            escape(name),
+            cell("v"),
+            escape(value)
+        );
+        if row < existing {
+            let _ = write!(
+                out,
+                "<label class=\"list-cell list-remove\"><span class=\"list-caption\">{}</span><input type=\"checkbox\" name=\"{}\" value=\"1\"{}></label>",
+                l.text(keys::COL_REMOVE),
+                cell("x"),
+                if *removed { " checked" } else { "" }
+            );
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+/// The captions of the name and of the value of a field of named entries.
+fn entry_titles(l: Locale<'_>, field: &str, json: bool) -> (String, String) {
+    let name = match field {
+        "texts" => keys::COL_MESSAGE_ID,
+        "rules" => keys::COL_RULE_NAME,
+        "counters" => keys::COL_COUNTER_NAME,
+        _ => keys::COL_NAME,
+    };
+    let value = if json { keys::COL_JSON } else { keys::COL_TEXT };
+    (l.text(name), l.text(value))
 }
 
 /// The shown text of one cell of a stored row.
@@ -434,10 +539,16 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .filter(|v| !v.is_null())
                 .or_else(|| form::lookup(&effective["modules"][module]["config"], &field.name))
                 .unwrap_or(&Value::Null);
-            let fallback = match current {
-                Value::String(s) => s.clone(),
-                Value::Null => String::new(),
-                v => v.to_string(),
+            let fallback = match (&field.kind, current) {
+                (_, Value::String(s)) => s.clone(),
+                (_, Value::Null) => String::new(),
+                (Kind::Json, v) => serde_json::to_string_pretty(v).unwrap_or_default(),
+                (_, Value::Array(a)) if a.iter().all(Value::is_string) => a
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                (_, v) => v.to_string(),
             };
             let value = input.get(&field.name).unwrap_or(&fallback);
             let field_errors = errors.get(&field.name);
@@ -445,7 +556,10 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .map_or_else(String::new, |(name, value)| {
                     format!(" when\" data-when=\"{}={}", escape(name), escape(value))
                 });
-            let wide = if matches!(field.kind, Kind::List(_)) {
+            let wide = if matches!(
+                field.kind,
+                Kind::List(_) | Kind::Entries { .. } | Kind::Json
+            ) {
                 " wide"
             } else {
                 ""
@@ -470,6 +584,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 Kind::List(columns) => {
                     list_editor(l, field, columns, index, current, input, directory)
                 }
+                Kind::Entries { json } => entries_editor(l, field, *json, current, input),
                 _ => control(l, field, index, value, directory, field_errors.is_some()),
             };
             let _ = write!(

@@ -15,7 +15,11 @@ pub(super) fn bot_data(
                 "properties":{
                     "channel":{"type":"string","pattern":"^[1-9][0-9]{0,19}$"},
                     "after":{"type":"string","pattern":"^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
-                    "skip_pinned":{"type":"boolean","default":true}}}}}}]});
+                    "skip_pinned":{"type":"boolean","default":true}}}},
+                "texts":{"description":"texts","x-ui":{"widget":"entries"}},
+                "notes":{"type":"object","propertyNames":{"pattern":"^[a-z]{1,8}$"},"x-ui":{"widget":"entries-json"}},
+                "raid":{"type":["object","null"],"x-ui":{"widget":"json"}},
+                "keep":{"x-ui":{"widget":"flag-or-roles"}}}}]});
         }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
             json!("<script>description</script>");
@@ -99,6 +103,42 @@ async fn a_list_is_edited_row_by_row() {
         sent["modules"]["channels"]["config"]["auto_delete"],
         json!([{"channel": "11", "after": "1h 30m", "skip_pinned": true}])
     );
+    let result = response(&config, Method::POST, path, "etag=%221%22&f.keep=1%2C+22").await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["keep"],
+        json!(["1", "22"])
+    );
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    for expected in [
+        "name=\"f.texts.0.k\"",
+        "name=\"f.notes.0.v\"",
+        "pattern=\"^[a-z]{1,8}$\"",
+        "class=\"json\"",
+        "name=\"f.raid\"",
+        "name=\"f.keep\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    let entries = "etag=%221%22&f.texts.0.k=sdk-done&f.texts.0.v=Noted.\
+        &f.notes.0.k=spam&f.notes.0.v=%7B%22on%22%3Atrue%7D&f.raid=%7B%22levels%22%3A%5B%5D%7D";
+    let result = response(&config, Method::POST, path, entries).await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    let saved = &sent["modules"]["channels"]["config"];
+    assert_eq!(saved["texts"], json!({"sdk-done": "Noted."}));
+    assert_eq!(saved["notes"], json!({"spam": {"on": true}}));
+    assert_eq!(saved["raid"], json!({"levels": []}));
+    let result = response(
+        &config,
+        Method::POST,
+        path,
+        "etag=%221%22&f.notes.0.k=spam&f.notes.0.v=%7B",
+    )
+    .await;
+    assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(html(result).await.contains("spam: "));
     let result = response(
         &config,
         Method::POST,
