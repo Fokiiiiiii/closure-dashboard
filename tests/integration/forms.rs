@@ -9,6 +9,14 @@ pub(super) fn bot_data(
     let fixture = |source: &str| serde_json::from_str::<serde_json::Value>(source).unwrap();
     let data = if path == "/v1/schema" {
         let mut schema = fixture(include_str!("../fixtures/schema-basic.json"));
+        if fake.rules {
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] = json!({"anyOf":[{"type":"object","properties":{"auto_delete":{
+                "type":"array","maxItems":25,"items":{"type":"object","required":["channel","after"],
+                "properties":{
+                    "channel":{"type":"string","pattern":"^[1-9][0-9]{0,19}$"},
+                    "after":{"type":"string","pattern":"^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
+                    "skip_pinned":{"type":"boolean","default":true}}}}}}]});
+        }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
             json!("<script>description</script>");
         schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"]["properties"]["config"]
@@ -59,6 +67,49 @@ pub(super) fn bot_data(
         json!({})
     };
     (StatusCode::OK, [(header::ETAG, "\"1\"")], data.to_string())
+}
+
+#[tokio::test]
+async fn a_list_is_edited_row_by_row() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.rules = true;
+    }
+    let path = "/g/42/modules/channels";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    for expected in [
+        "name=\"f.auto_delete.0.channel\"",
+        "name=\"f.auto_delete.0.after\"",
+        "name=\"f.auto_delete.0.skip_pinned\"",
+        "<option value=\"11\">&lt;script&gt;</option>",
+        "list-caption",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    assert!(!page.contains("f.auto_delete.0.x"));
+    assert!(!page.contains("style="));
+    let rule = "etag=%221%22&f.auto_delete.0.channel=11&f.auto_delete.0.after=1h+30m\
+        &f.auto_delete.0.skip_pinned=false&f.auto_delete.0.skip_pinned=true";
+    let result = response(&config, Method::POST, path, rule).await;
+    assert_eq!(result.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["auto_delete"],
+        json!([{"channel": "11", "after": "1h 30m", "skip_pinned": true}])
+    );
+    let result = response(
+        &config,
+        Method::POST,
+        path,
+        "etag=%221%22&f.auto_delete.0.channel=11&f.auto_delete.0.after=",
+    )
+    .await;
+    assert_eq!(result.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = html(result).await;
+    assert!(page.contains("role=\"alert\""));
+    assert!(page.contains("<option value=\"11\" selected>"));
 }
 
 #[tokio::test]

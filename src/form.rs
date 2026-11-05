@@ -8,6 +8,18 @@ pub enum Kind {
     String,
     Enum(Vec<String>),
     Roles,
+    /// Texts told apart by commas, such as the emojis of a rule.
+    Words,
+    /// Rows of one fixed shape, such as the rules of a channel setting.
+    List(Vec<Column>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Column {
+    pub name: String,
+    pub kind: Kind,
+    pub required: bool,
+    pub schema: Value,
 }
 
 pub const SETTINGS: &[&str] = &[
@@ -100,8 +112,8 @@ pub struct Field {
 #[must_use]
 pub fn section_rank(section: &str) -> usize {
     match section {
-        "warn" | "behavior" | "destination" => 0,
-        "timeout" | "events" => 1,
+        "warn" | "behavior" | "destination" | "auto_delete" => 0,
+        "timeout" | "events" | "auto_react" => 1,
         "voice" => 2,
         "ban" => 3,
         _ => 9,
@@ -119,6 +131,8 @@ pub fn section(module: &str, field: &str) -> &'static str {
         ("automod", "dry_run" | "dm_on_action" | "warn_expire_days") => "behavior",
         ("logs", "channel" | "webhook") => "destination",
         ("logs", _) => "events",
+        ("channels", "auto_delete") => "auto_delete",
+        ("channels", "auto_react") => "auto_react",
         _ => "other",
     }
 }
@@ -164,6 +178,44 @@ pub fn modules(schema: &Value) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+/// The columns of a list: the required ones first, then the rest; `None` when one is of a kind the form cannot show.
+fn columns(items: &Value) -> Option<Vec<Column>> {
+    let properties = items["properties"].as_object()?;
+    let required: Vec<&str> = items["required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let names = required
+        .iter()
+        .copied()
+        .filter(|name| properties.contains_key(*name))
+        .chain(
+            properties
+                .keys()
+                .map(String::as_str)
+                .filter(|name| !required.contains(name)),
+        );
+    names
+        .map(|name| {
+            let schema = non_null(&properties[name])?;
+            let kind = match schema["type"].as_str()? {
+                "boolean" => Kind::Boolean,
+                "string" => Kind::String,
+                "array" if schema["items"]["type"] == "string" => Kind::Words,
+                _ => return None,
+            };
+            Some(Column {
+                name: name.to_owned(),
+                kind,
+                required: required.contains(&name),
+                schema,
+            })
+        })
+        .collect()
+}
+
 #[must_use]
 pub fn fields(module: &Value) -> Vec<Field> {
     let Some(config) = non_null(&module["properties"]["config"]) else {
@@ -201,6 +253,8 @@ pub fn fields(module: &Value) -> Vec<Field> {
                 } else {
                     Kind::String
                 }
+            } else if ty == "array" && schema["items"]["type"] == "object" {
+                Kind::List(columns(&schema["items"])?)
             } else {
                 return None;
             };
@@ -314,6 +368,15 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
+        Kind::List(_) => None,
+        Kind::Words => {
+            let values: Vec<_> = input
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .collect();
+            (!values.is_empty()).then(|| json!(values))
+        }
         Kind::Roles => {
             let values: Vec<_> = input
                 .split(',')
@@ -366,6 +429,62 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             Some(json!(input))
         }
     }
+}
+
+/// The rows of a list field, read from the inputs named `<field>.<row>.<column>`.
+/// A row ticked for removal or left empty is dropped; `None` when a row cannot be read.
+#[must_use]
+pub fn rows<S: std::hash::BuildHasher>(
+    field: &Field,
+    columns: &[Column],
+    input: &HashMap<String, String, S>,
+) -> Option<Value> {
+    let prefix = format!("{}.", field.name);
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    let mut rows = Vec::new();
+    for number in numbers {
+        let key = |column: &str| format!("{prefix}{number}.{column}");
+        if input.get(&key("x")).is_some_and(|v| v == "1") {
+            continue;
+        }
+        let mut row = Map::new();
+        for column in columns {
+            let raw = input.get(&key(&column.name)).map_or("", String::as_str);
+            let cell = Field {
+                name: column.name.clone(),
+                label: column.name.clone(),
+                kind: column.kind.clone(),
+                schema: column.schema.clone(),
+            };
+            match parse(&cell, raw) {
+                Some(Value::Null) => {}
+                Some(value) => {
+                    row.insert(column.name.clone(), value);
+                }
+                None if column.kind == Kind::Boolean && raw.is_empty() => {}
+                None => return None,
+            }
+        }
+        if !columns
+            .iter()
+            .any(|c| c.kind != Kind::Boolean && row.contains_key(&c.name))
+        {
+            continue;
+        }
+        if columns
+            .iter()
+            .any(|c| c.required && !row.contains_key(&c.name))
+        {
+            return None;
+        }
+        rows.push(Value::Object(row));
+    }
+    Some(Value::Array(rows))
 }
 
 #[must_use]
@@ -464,6 +583,88 @@ mod tests {
         parts.sort_by_key(|p| section_rank(p));
         assert_eq!(parts, ["warn", "timeout", "voice", "ban", "other"]);
     }
+    fn channel_rules() -> Value {
+        json!({"properties": {"config": {"properties": {"auto_delete": {
+            "type": "array", "maxItems": 25, "items": {
+                "type": "object", "required": ["channel", "after"],
+                "properties": {
+                    "skip_pinned": {"type": "boolean", "default": true},
+                    "channel": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+                    "after": {"type": "string", "pattern": "^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
+                    "emojis": {"type": "array", "items": {"type": "string"}}
+                }
+            }
+        }}}}})
+    }
+
+    fn rows_of(input: &[(&str, &str)]) -> Option<Value> {
+        let all = fields(&channel_rules());
+        let field = &all[0];
+        let Kind::List(columns) = &field.kind else {
+            panic!("not a list");
+        };
+        let input: HashMap<String, String> = input
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        rows(field, columns, &input)
+    }
+
+    #[test]
+    fn a_list_shows_required_columns_first() {
+        let all = fields(&channel_rules());
+        let Kind::List(columns) = &all[0].kind else {
+            panic!("not a list");
+        };
+        let names: Vec<_> = columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["channel", "after", "emojis", "skip_pinned"]);
+        assert_eq!(columns[2].kind, Kind::Words);
+        assert!(columns[0].required && !columns[3].required);
+    }
+
+    #[test]
+    fn a_list_reads_its_rows_and_drops_removed_and_empty_ones() {
+        let rows = rows_of(&[
+            ("auto_delete.0.channel", "10"),
+            ("auto_delete.0.after", "1h 30m"),
+            ("auto_delete.0.skip_pinned", "true"),
+            ("auto_delete.1.channel", "11"),
+            ("auto_delete.1.after", "5m"),
+            ("auto_delete.1.x", "1"),
+            ("auto_delete.2.channel", ""),
+            ("auto_delete.2.after", ""),
+            ("auto_delete.2.skip_pinned", "true"),
+        ]);
+        assert_eq!(
+            rows,
+            Some(json!([{"channel": "10", "after": "1h 30m", "skip_pinned": true}]))
+        );
+        assert_eq!(
+            rows_of(&[("auto_delete.0.skip_pinned", "false")]),
+            Some(json!([]))
+        );
+    }
+
+    #[test]
+    fn a_list_row_needs_its_required_columns_and_valid_cells() {
+        assert_eq!(rows_of(&[("auto_delete.0.channel", "10")]), None);
+        assert_eq!(
+            rows_of(&[
+                ("auto_delete.0.channel", "ten"),
+                ("auto_delete.0.after", "1h")
+            ]),
+            None
+        );
+        assert_eq!(
+            rows_of(&[
+                ("auto_delete.0.channel", "10"),
+                ("auto_delete.0.after", "1h"),
+                ("auto_delete.0.emojis", " a , b ,"),
+            ]),
+            Some(json!([{"channel": "10", "after": "1h", "emojis": ["a", "b"]}]))
+        );
+    }
+
     #[test]
     fn a_text_area_keeps_its_lines_as_plain_line_feeds() {
         let module = json!({"properties":{"config":{"properties":{

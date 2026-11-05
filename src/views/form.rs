@@ -1,11 +1,11 @@
 use super::{modules::toggle, shell};
 use crate::{
-    form::{self, Field, Kind},
+    form::{self, Column, Field, Kind},
     html::escape,
     i18n::{Locale, keys},
 };
 use axum::http::HeaderMap;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{collections::HashMap, fmt::Write};
 
 pub(crate) struct FormPage<'a> {
@@ -39,6 +39,8 @@ fn section_title(l: Locale<'_>, key: &str) -> String {
         "timeout" => keys::SEC_TIMEOUT,
         "voice" => keys::SEC_VOICE,
         "ban" => keys::SEC_BAN,
+        "auto_delete" => keys::SEC_AUTO_DELETE,
+        "auto_react" => keys::SEC_AUTO_REACT,
         "behavior" => keys::SEC_BEHAVIOR,
         "destination" => keys::SEC_DESTINATION,
         "events" => keys::SEC_EVENTS,
@@ -187,7 +189,8 @@ pub(super) fn control(
                 escape(value)
             )
         }
-        Kind::String | Kind::Roles => {
+        Kind::List(_) => String::new(),
+        Kind::String | Kind::Roles | Kind::Words => {
             let pattern = field.schema["pattern"]
                 .as_str()
                 .map_or_else(String::new, |v| format!(" pattern=\"{}\"", escape(v)));
@@ -200,6 +203,142 @@ pub(super) fn control(
             )
         }
     }
+}
+
+/// The caption of one column of a list.
+fn column_title(l: Locale<'_>, name: &str) -> String {
+    l.text(match name {
+        "channel" => keys::COL_CHANNEL,
+        "after" => keys::COL_AFTER,
+        "skip_pinned" => keys::COL_SKIP_PINNED,
+        "emojis" => keys::COL_EMOJIS,
+        "skip_bots" => keys::COL_SKIP_BOTS,
+        _ => return escape(name),
+    })
+}
+
+/// The shown text of one cell of a stored row.
+fn cell_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => String::new(),
+    }
+}
+
+/// One row per entry of a list, and one empty row to add the next entry. After a refused save the
+/// rows come back as they were typed.
+fn list_editor(
+    l: Locale<'_>,
+    field: &Field,
+    columns: &[Column],
+    index: usize,
+    current: &Value,
+    input: &HashMap<String, String>,
+    directory: Option<&Value>,
+) -> String {
+    let prefix = format!("{}.", field.name);
+    let cell =
+        |number: usize, column: &Column| input.get(&format!("{prefix}{number}.{}", column.name));
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    // (the text of each column, whether the row is ticked for removal)
+    let mut rows: Vec<(Vec<String>, bool)> = if numbers.is_empty() {
+        current
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|row| {
+                let texts = columns
+                    .iter()
+                    .map(|c| cell_text(row.get(&c.name)))
+                    .collect();
+                (texts, false)
+            })
+            .collect()
+    } else {
+        numbers
+            .iter()
+            .map(|&n| {
+                let texts = columns
+                    .iter()
+                    .map(|c| cell(n, c).cloned().unwrap_or_default())
+                    .collect();
+                let removed = input
+                    .get(&format!("{prefix}{n}.x"))
+                    .is_some_and(|v| v == "1");
+                (texts, removed)
+            })
+            .collect()
+    };
+    rows.retain(|(texts, removed)| {
+        *removed
+            || columns
+                .iter()
+                .zip(texts)
+                .any(|(c, text)| c.kind != Kind::Boolean && !text.is_empty())
+    });
+    let existing = rows.len();
+    if (rows.len() as u64) < field.schema["maxItems"].as_u64().unwrap_or(25) {
+        let blank = columns
+            .iter()
+            .map(|c| match c.kind {
+                Kind::Boolean => c.schema["default"].as_bool().unwrap_or(false).to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        rows.push((blank, false));
+    }
+    let mut out = String::from("<div class=\"list-editor\">");
+    for (row, (texts, removed)) in rows.iter().enumerate() {
+        out.push_str("<div class=\"list-row\">");
+        for (c, (column, text)) in columns.iter().zip(texts).enumerate() {
+            let mut schema = column.schema.clone();
+            if column.name == "channel" {
+                schema["x-ui"]["widget"] = json!("channel");
+            }
+            let cell = Field {
+                name: format!("{prefix}{row}.{}", column.name),
+                label: column.name.clone(),
+                kind: column.kind.clone(),
+                schema,
+            };
+            let _ = write!(
+                out,
+                "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
+                column_title(l, &column.name),
+                control(
+                    l,
+                    &cell,
+                    index * 1000 + row * 10 + c,
+                    text,
+                    directory,
+                    false
+                )
+            );
+        }
+        if row < existing {
+            let _ = write!(
+                out,
+                "<label class=\"list-cell list-remove\"><span class=\"list-caption\">{}</span><input type=\"checkbox\" name=\"{}\" value=\"1\"{}></label>",
+                l.text(keys::COL_REMOVE),
+                escape(&format!("f.{prefix}{row}.x")),
+                if *removed { " checked" } else { "" }
+            );
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</div>");
+    out
 }
 
 #[allow(clippy::too_many_lines)]
@@ -279,12 +418,12 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         }
         for &index in members {
             let field = &fields[index];
-            let fallback = stored["modules"][module]["config"]
+            let current = stored["modules"][module]["config"]
                 .get(&field.name)
                 .filter(|v| !v.is_null())
                 .or_else(|| effective["modules"][module]["config"].get(&field.name))
                 .unwrap_or(&Value::Null);
-            let fallback = match fallback {
+            let fallback = match current {
                 Value::String(s) => s.clone(),
                 Value::Null => String::new(),
                 v => v.to_string(),
@@ -295,9 +434,14 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .map_or_else(String::new, |(name, value)| {
                     format!(" when\" data-when=\"{}={}", escape(name), escape(value))
                 });
+            let wide = if matches!(field.kind, Kind::List(_)) {
+                " wide"
+            } else {
+                ""
+            };
             let _ = write!(
                 body,
-                "<div class=\"settings-row{when}\"><div><label for=\"field-{index}\" title=\"{}\">{}</label>",
+                "<div class=\"settings-row{wide}{when}\"><div><label for=\"field-{index}\" title=\"{}\">{}</label>",
                 escape(field.schema["description"].as_str().unwrap_or(&field.label)),
                 escape(&super::first_sentence(&field.label))
             );
@@ -311,10 +455,15 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 }
                 body.push_str("</div>");
             }
+            let widget = match &field.kind {
+                Kind::List(columns) => {
+                    list_editor(l, field, columns, index, current, input, directory)
+                }
+                _ => control(l, field, index, value, directory, field_errors.is_some()),
+            };
             let _ = write!(
                 body,
-                "</div><div class=\"settings-control\">{}</div></div>",
-                control(l, field, index, value, directory, field_errors.is_some())
+                "</div><div class=\"settings-control\">{widget}</div></div>"
             );
         }
         body.push_str("</section>");

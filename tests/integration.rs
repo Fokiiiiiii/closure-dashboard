@@ -65,6 +65,7 @@ struct Fake {
     directory_failure: bool,
     form_put_status: Option<StatusCode>,
     form_body: Option<serde_json::Value>,
+    rules: bool,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();

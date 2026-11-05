@@ -65,6 +65,15 @@ fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiError) -> Re
         .into_response()
 }
 
+/// Whether the input `name` belongs to `field`: it is the field, or a cell of its rows.
+fn in_field(field: &form::Field, name: &str) -> bool {
+    name == field.name
+        || (matches!(field.kind, form::Kind::List(_))
+            && name
+                .strip_prefix(field.name.as_str())
+                .is_some_and(|rest| rest.starts_with('.')))
+}
+
 pub(super) fn return_path(app: &App, headers: &HeaderMap, id: &str) -> String {
     headers
         .get(header::REFERER)
@@ -197,11 +206,14 @@ pub(super) async fn save(
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
         } else if let Some(name) = name.strip_prefix("f.") {
-            let Some(field) = fields.iter().find(|f| f.name == name) else {
+            let Some(field) = fields.iter().find(|f| in_field(f, name)) else {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
+            // A switch is sent twice, as "false" and then "true" when it is on; a list holds switches.
             if let Some(previous) = input.insert(name.to_owned(), value.clone())
-                && !(field.kind == form::Kind::Boolean && previous == "false" && value == "true")
+                && !(matches!(field.kind, form::Kind::Boolean | form::Kind::List(_))
+                    && previous == "false"
+                    && value == "true")
             {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
@@ -218,6 +230,27 @@ pub(super) async fn save(
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
     for field in &fields {
+        if let form::Kind::List(columns) = &field.kind {
+            if input.keys().any(|name| in_field(field, name)) {
+                match form::rows(field, columns, &input) {
+                    Some(value) => {
+                        let config = &data.stored["modules"][&module]["config"];
+                        let effective = &data.effective["modules"][&module]["config"];
+                        if form::should_write(
+                            &value,
+                            config.get(&field.name),
+                            effective.get(&field.name),
+                        ) {
+                            changes.insert(field.name.clone(), value);
+                        }
+                    }
+                    None => {
+                        errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
+                    }
+                }
+            }
+            continue;
+        }
         let Some(value) = input.get(&field.name) else {
             continue;
         };
@@ -273,8 +306,11 @@ pub(super) async fn save(
                 let key = fields
                     .iter()
                     .find(|f| {
+                        let path = format!("modules.{module}.config.{}", f.name);
                         issue.path == f.name
-                            || issue.path == format!("modules.{module}.config.{}", f.name)
+                            || issue.path == path
+                            || (matches!(f.kind, form::Kind::List(_))
+                                && issue.path.starts_with(&path))
                     })
                     .map_or_else(String::new, |f| f.name.clone());
                 errors
