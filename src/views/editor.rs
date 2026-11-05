@@ -403,8 +403,16 @@ fn object_body(
     state: &State,
     tag: Option<&str>,
 ) -> String {
-    members
-        .iter()
+    // Plain fields come first, then the groups and the lists, whatever order the schema names them in.
+    let weight = |p: &&Prop| match p.node {
+        Node::Object(_) => 1,
+        Node::Entries { .. } | Node::Variants { .. } => 2,
+        _ => 0,
+    };
+    let mut ordered: Vec<&Prop> = members.iter().collect();
+    ordered.sort_by_key(weight);
+    ordered
+        .into_iter()
         .map(|p| prop(ctx, p, path, state, tag))
         .collect()
 }
