@@ -327,7 +327,7 @@ fn list_editor(
                 control(
                     l,
                     &cell,
-                    index * 1000 + row * 10 + c,
+                    100_000 + index * 1000 + row * 10 + c,
                     text,
                     directory,
                     false
