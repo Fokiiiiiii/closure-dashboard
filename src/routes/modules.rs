@@ -236,10 +236,12 @@ pub(super) async fn save(
                     Some(value) => {
                         let config = &data.stored["modules"][&module]["config"];
                         let effective = &data.effective["modules"][&module]["config"];
+                        // A list that is not in the default configuration is an empty one.
+                        let empty = Value::Array(Vec::new());
                         if form::should_write(
                             &value,
-                            config.get(&field.name),
-                            effective.get(&field.name),
+                            form::lookup(config, &field.name),
+                            form::lookup(effective, &field.name).or(Some(&empty)),
                         ) {
                             changes.insert(field.name.clone(), value);
                         }

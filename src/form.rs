@@ -117,6 +117,7 @@ pub fn section_rank(section: &str) -> usize {
         "voice" => 2,
         "ban" => 3,
         "escalation" => 4,
+        "templates" => 5,
         _ => 9,
     }
 }
@@ -135,6 +136,7 @@ pub fn section(module: &str, field: &str) -> &'static str {
         ("channels", "auto_delete") => "auto_delete",
         ("channels", "auto_react") => "auto_react",
         ("moderation", "escalation") => "escalation",
+        ("moderation", name) if name.starts_with("templates.") => "templates",
         _ => "other",
     }
 }
@@ -243,56 +245,84 @@ pub fn fields(module: &Value) -> Vec<Field> {
     };
     properties
         .iter()
-        .filter_map(|(name, value)| {
-            let schema = non_null(value)?;
-            let ty = &schema["type"];
-            let string = ty == "string"
-                || ty.as_array().is_some_and(|a| {
-                    a.len() == 2 && a.contains(&json!("string")) && a.contains(&json!("null"))
-                });
-            let kind = if ty == "boolean" {
-                Kind::Boolean
-            } else if ty == "integer"
-                && schema["minimum"].as_i64().is_some()
-                && schema["maximum"].as_i64().is_some()
-            {
-                Kind::Integer
-            } else if string {
-                if let Some(values) = schema["enum"].as_array() {
-                    Kind::Enum(
-                        values
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .filter(|v| !v.is_empty())
-                            .map(str::to_owned)
-                            .collect(),
-                    )
-                } else {
-                    Kind::String
-                }
-            } else if ty == "array" && schema["items"]["type"] == "object" {
-                Kind::List(columns(&schema["items"])?)
-            } else {
-                return None;
-            };
-            let description = schema["description"].as_str().unwrap_or("");
-            let key_like = !description.is_empty()
-                && description
-                    .bytes()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-');
-            let label = if description.is_empty() || key_like {
-                name
-            } else {
-                description
-            };
-            Some(Field {
-                name: name.clone(),
-                label: label.to_owned(),
-                kind,
-                schema,
-            })
+        .flat_map(|(name, value)| match nested_lists(name, value) {
+            Some(fields) => fields,
+            None => field(name, value).into_iter().collect(),
         })
         .collect()
+}
+
+/// A property that is an object of lists shows as one list per member, named `property.member`.
+fn nested_lists(name: &str, value: &Value) -> Option<Vec<Field>> {
+    let schema = non_null(value)?;
+    let members = schema["properties"]
+        .as_object()
+        .filter(|members| !members.is_empty() && schema["type"] == "object")?;
+    members
+        .iter()
+        .map(|(member, value)| {
+            let value = non_null(value)?;
+            (value["type"] == "array").then_some(())?;
+            field(&format!("{name}.{member}"), &value)
+        })
+        .collect()
+}
+
+/// The value at `name` of a module's configuration; a dotted name goes into nested objects.
+#[must_use]
+pub fn lookup<'a>(config: &'a Value, name: &str) -> Option<&'a Value> {
+    name.split('.')
+        .try_fold(config, |value, part| value.get(part))
+}
+
+fn field(name: &str, value: &Value) -> Option<Field> {
+    let schema = non_null(value)?;
+    let ty = &schema["type"];
+    let string = ty == "string"
+        || ty.as_array().is_some_and(|a| {
+            a.len() == 2 && a.contains(&json!("string")) && a.contains(&json!("null"))
+        });
+    let kind = if ty == "boolean" {
+        Kind::Boolean
+    } else if ty == "integer"
+        && schema["minimum"].as_i64().is_some()
+        && schema["maximum"].as_i64().is_some()
+    {
+        Kind::Integer
+    } else if string {
+        if let Some(values) = schema["enum"].as_array() {
+            Kind::Enum(
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            )
+        } else {
+            Kind::String
+        }
+    } else if ty == "array" && schema["items"]["type"] == "object" {
+        Kind::List(columns(&schema["items"])?)
+    } else {
+        return None;
+    };
+    let description = schema["description"].as_str().unwrap_or("");
+    let key_like = !description.is_empty()
+        && description
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-');
+    let label = if description.is_empty() || key_like {
+        name
+    } else {
+        description
+    };
+    Some(Field {
+        name: name.to_owned(),
+        label: label.to_owned(),
+        kind,
+        schema,
+    })
 }
 
 // shortcut: only anchored character classes are checked here; any other syntax passes because the bot validates on save.
@@ -579,7 +609,17 @@ pub fn update<S: std::hash::BuildHasher>(
         .as_object_mut()
         .ok_or("invalid config")?;
     for (key, value) in changes {
-        config.insert(key.clone(), value.clone());
+        let mut parts: Vec<&str> = key.split('.').collect();
+        let last = parts.pop().unwrap_or(key);
+        let mut node = &mut *config;
+        for part in parts {
+            node = node
+                .entry(part)
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or("invalid config")?;
+        }
+        node.insert(last.to_owned(), value.clone());
     }
     Ok(())
 }
@@ -729,6 +769,32 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn an_object_of_lists_shows_one_list_per_member_and_saves_inside_it() {
+        let list = json!({"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"}
+        }}});
+        let module = json!({"properties": {"config": {"properties": {"templates": {
+            "type": "object", "properties": {"timeout": list, "kick": list}
+        }}}}});
+        let all = fields(&module);
+        let names: Vec<_> = all.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["templates.kick", "templates.timeout"]);
+        assert_eq!(section("moderation", "templates.kick"), "templates");
+        let mut document = json!({"modules": {"moderation": {"config": {
+            "templates": {"ban": [{"id": "a"}]}
+        }}}});
+        let changes = HashMap::from([("templates.kick".to_owned(), json!([{"id": "b"}]))]);
+        update(&mut document, "moderation", &changes).unwrap();
+        let config = &document["modules"]["moderation"]["config"];
+        assert_eq!(
+            lookup(config, "templates.kick"),
+            Some(&json!([{"id": "b"}]))
+        );
+        assert_eq!(lookup(config, "templates.ban"), Some(&json!([{"id": "a"}])));
+        assert_eq!(lookup(config, "templates.vcmute"), None);
     }
 
     #[test]

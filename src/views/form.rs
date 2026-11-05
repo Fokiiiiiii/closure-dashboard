@@ -42,6 +42,7 @@ fn section_title(l: Locale<'_>, key: &str) -> String {
         "auto_delete" => keys::SEC_AUTO_DELETE,
         "auto_react" => keys::SEC_AUTO_REACT,
         "escalation" => keys::SEC_ESCALATION,
+        "templates" => keys::SEC_TEMPLATES,
         "behavior" => keys::SEC_BEHAVIOR,
         "destination" => keys::SEC_DESTINATION,
         "events" => keys::SEC_EVENTS,
@@ -220,6 +221,9 @@ fn column_title(l: Locale<'_>, name: &str) -> String {
         "warns" => keys::COL_WARNS,
         "action" => keys::COL_ACTION,
         "duration" => keys::COL_DURATION,
+        "id" => keys::COL_ID,
+        "label" => keys::COL_LABEL,
+        "reason" => keys::COL_REASON,
         _ => return escape(name),
     })
 }
@@ -426,10 +430,9 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         }
         for &index in members {
             let field = &fields[index];
-            let current = stored["modules"][module]["config"]
-                .get(&field.name)
+            let current = form::lookup(&stored["modules"][module]["config"], &field.name)
                 .filter(|v| !v.is_null())
-                .or_else(|| effective["modules"][module]["config"].get(&field.name))
+                .or_else(|| form::lookup(&effective["modules"][module]["config"], &field.name))
                 .unwrap_or(&Value::Null);
             let fallback = match current {
                 Value::String(s) => s.clone(),
