@@ -696,7 +696,22 @@ pub(crate) fn object_card(
             ),
         ));
     }
-    body.push_str(&object_body(ctx, members, path, state, None));
+    // A feature's own switch is in the page header; its value rides along so that a save keeps it.
+    let shown: Vec<Prop> = members
+        .iter()
+        .filter(|p| p.name != "enabled")
+        .cloned()
+        .collect();
+    body.push_str(&object_body(ctx, &shown, path, state, None));
+    let kept = one(state, &join(path, "enabled"));
+    if !kept.is_empty() {
+        let _ = write!(
+            body,
+            "<input type=\"hidden\" name=\"{}\" value=\"{}\">",
+            escape(&join(path, "enabled")),
+            escape(kept)
+        );
+    }
     section(&ctx.l.text(keys::ED_BASIC), "", &body)
 }
 
@@ -721,9 +736,10 @@ pub(crate) fn editor_page(
     inner: &str,
     banner: &[String],
     saved: bool,
+    switch: &str,
 ) -> String {
     let mut body = format!(
-        "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1></header>{}",
+        "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1>{switch}</header>{}",
         module_icon(module),
         title,
         part_tabs(l, id, module, part, fields)
@@ -775,10 +791,11 @@ pub(crate) fn collection_page(
     items: &[Item],
     etag: &str,
     saved: bool,
+    switch: &str,
 ) -> String {
     let base = super::form::part_path(id, module, part);
     let mut body = format!(
-        "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1><a class=\"button primary\" href=\"{}/new\">＋ {}</a></header>{}",
+        "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1><div class=\"head-actions\">{switch}<a class=\"button primary\" href=\"{}/new\">＋ {}</a></div></header>{}",
         module_icon(module),
         part_name(l, module, part),
         escape(&base),

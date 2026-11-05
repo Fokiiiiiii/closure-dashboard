@@ -23,6 +23,25 @@ pub(super) fn toggle(l: Locale<'_>, id: &str, module: &str, enabled: bool) -> St
     )
 }
 
+/// The switch of one feature of a big module: it turns the feature off and keeps its settings.
+pub(crate) fn feature_toggle(
+    l: Locale<'_>,
+    id: &str,
+    module: &str,
+    part: &str,
+    on: bool,
+) -> String {
+    format!(
+        "<form method=\"post\" action=\"/g/{}/features/{}/{}\"><button class=\"switch\" type=\"submit\" name=\"enabled\" value=\"{}\" role=\"switch\" aria-checked=\"{on}\" aria-label=\"{}: {}\"></button></form>",
+        escape(id),
+        escape(module),
+        escape(part),
+        !on,
+        part_name(l, module, part),
+        l.text(if on { keys::ENABLED } else { keys::DISABLED })
+    )
+}
+
 /// A small line icon that says what a module is for; a plain box for one the dashboard does not know.
 pub(super) fn module_icon(module: &str) -> String {
     let path = match module {
@@ -143,14 +162,17 @@ fn module_tiles(
                 l.text(keys::SETTINGS)
             )
         };
-        let switch = if n == 0 {
-            toggle(l, id, module, enabled)
-        } else {
-            String::new()
+        let feature_on = form::feature(module, part)
+            .filter(|_| n > 0)
+            .map(|_| form::feature_on(module, part, effective));
+        let switch = match feature_on {
+            Some(on) => feature_toggle(l, id, module, part, on),
+            None if n == 0 => toggle(l, id, module, enabled),
+            None => String::new(),
         };
         tiles.push(format!(
             "<li class=\"card module-tile {}\"><div class=\"module-tile-heading\"><span class=\"module-title\">{}<span class=\"module-name\">{}</span></span>{switch}</div><p class=\"muted module-description\" title=\"{}\">{}</p>{action}</li>",
-            if enabled { "enabled" } else { "disabled" },
+            if enabled && feature_on != Some(false) { "enabled" } else { "disabled" },
             module_icon(module),
             tile_title(l, module, if n == 0 { "" } else { part }),
             escape(&description),

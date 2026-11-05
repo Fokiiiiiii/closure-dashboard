@@ -1421,8 +1421,12 @@
     "additionalProperties": {
      "type": "null"
     },
-    "description": "アンレイド: レイド中にサーバーを引き上げるレベル。省くと、アンレイドは無効です。",
+    "description": "アンチレイド: レイド中にサーバーを引き上げるレベル。省くと、アンチレイドは無効です。",
     "properties": {
+     "enabled": {
+      "type": "boolean",
+      "description": "アンチレイドを動かすかどうか。"
+     },
      "effects": {
       "anyOf": [
        {

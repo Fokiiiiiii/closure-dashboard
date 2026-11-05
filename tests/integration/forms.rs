@@ -18,6 +18,7 @@ pub(super) fn bot_data(
             ] {
                 parts[name]["x-ui"] = json!({"level": "basic", "widget": widget});
             }
+            parts["dry_run"] = json!({"type": "boolean"});
             schema["properties"]["modules"]["anyOf"][0]["properties"]["automod"]["properties"]["config"] =
                 json!({"anyOf": [{"type": "object", "properties": parts}]});
         }
@@ -236,7 +237,7 @@ async fn rules_are_cards_and_not_text() {
 }
 
 #[tokio::test]
-async fn the_anti_raid_has_a_page_with_a_switch() {
+async fn the_anti_raid_and_each_feature_have_a_switch_of_their_own() {
     let (config, state) = setup().await;
     {
         let mut state = state.lock().unwrap();
@@ -245,19 +246,63 @@ async fn the_anti_raid_has_a_page_with_a_switch() {
     }
     let path = "/g/42/modules/automod/antiraid";
     let page = html(response(&config, Method::GET, path, "").await).await;
-    assert!(page.contains("name=\"on\"") && page.contains("name=\"r.levels\""));
-    let on = "etag=%221%22&op=save&on=1&r.levels=none%0Alow&r.effects.0.__k=low&r.effects.0.slowmode.__on=1&r.effects.0.slowmode.seconds=10";
-    let result = response(&config, Method::POST, path, on).await;
+    assert!(page.contains("name=\"r.levels\"") && !page.contains("name=\"on\""));
+    assert!(page.contains("action=\"/g/42/features/automod/antiraid\""));
+    let save = "etag=%221%22&op=save&r.levels=none%0Alow&r.enabled=false&r.effects.0.__k=low&r.effects.0.slowmode.__on=1&r.effects.0.slowmode.seconds=10";
+    let result = response(&config, Method::POST, path, save).await;
     assert_eq!(result.status(), StatusCode::SEE_OTHER);
     let sent = state.lock().unwrap().form_body.clone().unwrap();
     assert_eq!(
         sent["modules"]["automod"]["config"]["antiraid"],
-        json!({"levels": ["none", "low"], "effects": {"low": {"slowmode": {"seconds": 10}}}})
+        json!({"levels": ["none", "low"], "enabled": false, "effects": {"low": {"slowmode": {"seconds": 10}}}})
     );
-    let off = response(&config, Method::POST, path, "etag=%221%22&op=save").await;
+
+    // The tiles of the list switch the features, and the switch writes the feature's own setting.
+    let list = html(response(&config, Method::GET, "/g/42/modules", "").await).await;
+    for feature in ["rules", "antiraid"] {
+        assert!(
+            list.contains(&format!("action=\"/g/42/features/automod/{feature}\"")),
+            "{feature}"
+        );
+    }
+    let off = response(
+        &config,
+        Method::POST,
+        "/g/42/features/automod/antiraid",
+        "enabled=false",
+    )
+    .await;
     assert_eq!(off.status(), StatusCode::SEE_OTHER);
     let sent = state.lock().unwrap().form_body.clone().unwrap();
-    assert!(sent["modules"]["automod"]["config"]["antiraid"].is_null());
+    assert_eq!(
+        sent["modules"]["automod"]["config"]["antiraid"]["enabled"],
+        json!(false)
+    );
+    let rules = response(
+        &config,
+        Method::POST,
+        "/g/42/features/automod/rules",
+        "enabled=false",
+    )
+    .await;
+    assert_eq!(rules.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["automod"]["config"]["rules_enabled"],
+        json!(false)
+    );
+    for bad in ["enabled=maybe", ""] {
+        let result = response(&config, Method::POST, "/g/42/features/automod/rules", bad).await;
+        assert_eq!(result.status(), StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let unknown = response(
+        &config,
+        Method::POST,
+        "/g/42/features/automod/counters",
+        "enabled=false",
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

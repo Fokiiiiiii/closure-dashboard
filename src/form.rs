@@ -170,6 +170,41 @@ pub fn part_of(module: &str, field: &str) -> &'static str {
     }
 }
 
+/// The settings that switch one feature of a big module on and off. A feature that is off keeps its
+/// settings and runs nothing, so these are not shown as fields of the form.
+pub const FEATURE_KEYS: [&str; 5] = [
+    "rules_enabled",
+    "escalation_enabled",
+    "templates_enabled",
+    "auto_delete_enabled",
+    "auto_react_enabled",
+];
+
+/// The setting that switches a part of a module, when the part can be switched.
+#[must_use]
+pub fn feature(module: &str, part: &str) -> Option<&'static str> {
+    match (module, part) {
+        ("automod", "rules") => Some("rules_enabled"),
+        ("automod", "antiraid") => Some("antiraid.enabled"),
+        ("moderation", "escalation") => Some("escalation_enabled"),
+        ("moderation", "templates") => Some("templates_enabled"),
+        ("channels", "auto_delete") => Some("auto_delete_enabled"),
+        ("channels", "auto_react") => Some("auto_react_enabled"),
+        _ => None,
+    }
+}
+
+/// Whether the feature runs, by the configuration in force. The anti-raid also needs its settings.
+#[must_use]
+pub fn feature_on(module: &str, part: &str, effective: &Value) -> bool {
+    let config = &effective["modules"][module]["config"];
+    let Some(key) = feature(module, part) else {
+        return true;
+    };
+    let flag = lookup(config, key).and_then(Value::as_bool).unwrap_or(true);
+    flag && (part != "antiraid" || config["antiraid"].is_object())
+}
+
 /// Whether a part is edited with the structured editor (rules, counters, anti-raid) rather than
 /// with a flat form.
 #[must_use]
@@ -301,6 +336,7 @@ pub fn fields(module: &Value) -> Vec<Field> {
     };
     properties
         .iter()
+        .filter(|(name, _)| !FEATURE_KEYS.contains(&name.as_str()))
         .flat_map(|(name, value)| match nested_lists(name, value) {
             Some(fields) => fields,
             None => field(name, value).into_iter().collect(),

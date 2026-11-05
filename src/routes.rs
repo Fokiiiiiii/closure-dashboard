@@ -62,6 +62,10 @@ pub fn router(config: Config) -> Router {
         )
         .route("/g/{id}/modules/{module}/toggle", post(toggle))
         .route(
+            "/g/{id}/features/{module}/{part}",
+            post(editor::feature_switch),
+        )
+        .route(
             "/g/{id}/modules/{module}/{part}",
             get(modules::edit_part).post(modules::save_part),
         )

@@ -143,7 +143,7 @@ pub(crate) use editor::{
 };
 pub(crate) use form::{FormPage, form_page, part_path};
 pub(crate) use history::history;
-pub(crate) use modules::{modules_page, part_name};
+pub(crate) use modules::{feature_toggle, modules_page, part_name};
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
 pub(crate) use settings::{SettingsPage, settings_page};

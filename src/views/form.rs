@@ -510,7 +510,17 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         "<header class=\"page-heading\"><h1 class=\"with-icon\">{}{}</h1>{}</header>",
         super::modules::module_icon(module),
         super::modules::part_name(l, module, part),
-        toggle(l, id, module, enabled)
+        if form::feature(module, part).is_some() {
+            super::modules::feature_toggle(
+                l,
+                id,
+                module,
+                part,
+                form::feature_on(module, part, effective),
+            )
+        } else {
+            toggle(l, id, module, enabled)
+        }
     );
     let every = form::fields(schema);
     body.push_str(&part_tabs(l, id, module, part, &every));

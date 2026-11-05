@@ -33,6 +33,25 @@ fn current<'a>(data: &'a Data, module: &str, part: &str) -> &'a Value {
         .unwrap_or(&Value::Null)
 }
 
+/// The switch of the feature a page edits, when it has one.
+fn feature_switch_html(
+    l: crate::i18n::Locale<'_>,
+    id: &str,
+    module: &str,
+    part: &str,
+    data: &Data,
+) -> String {
+    form::feature(module, part).map_or_else(String::new, |_| {
+        views::feature_toggle(
+            l,
+            id,
+            module,
+            part,
+            form::feature_on(module, part, &data.effective),
+        )
+    })
+}
+
 fn names(value: &Value) -> Vec<String> {
     value
         .as_object()
@@ -133,6 +152,7 @@ pub(super) async fn list(
         &items,
         &data.etag,
         saved,
+        &feature_switch_html(l, id, module, part, &data),
     ))
     .into_response()
 }
@@ -320,16 +340,7 @@ fn item_page(
     };
     let inner = match part {
         "rules" => views::rule_body(&ctx, &node, &state, new),
-        "antiraid" => format!(
-            "<section class=\"card ed-section\"><label class=\"ed-switch-label ed-master\"><input type=\"checkbox\" name=\"on\" value=\"1\"{}>{}</label></section>{}",
-            if one(&state, "on") == "1" {
-                " checked"
-            } else {
-                ""
-            },
-            l.text(keys::ED_ANTIRAID_ON),
-            views::object_card(&ctx, &node, "r", &state, false)
-        ),
+        "antiraid" => views::object_card(&ctx, &node, "r", &state, false),
         _ => views::object_card(&ctx, &node, "r", &state, new),
     };
     let title = if new {
@@ -364,6 +375,7 @@ fn item_page(
         &format!("{}{}", views::datalist_html(&ctx), inner),
         &banner,
         saved,
+        &feature_switch_html(l, id, module, part, data),
     );
     (status, Html(page)).into_response()
 }
@@ -475,8 +487,7 @@ pub(super) async fn save_item(
         .cloned()
         .unwrap_or_default();
     let (value, errors) = read(part, &node, key, &form_data, &map);
-    let switched_off = single && one(&form_data.state, "on") != "1";
-    if !errors.is_empty() && !switched_off {
+    if !errors.is_empty() {
         let banner = vec![refuse_text(l, Why::Invalid)];
         return item_page(
             app,
@@ -497,14 +508,7 @@ pub(super) async fn save_item(
         );
     }
     let (stored, next) = if single {
-        (
-            if switched_off {
-                Value::Null
-            } else {
-                value.unwrap_or_else(|| json!({}))
-            },
-            String::new(),
-        )
+        (value.unwrap_or_else(|| json!({})), String::new())
     } else {
         let new_key = if key == "new" {
             one(&form_data.state, "__id").trim().to_owned()
@@ -527,4 +531,47 @@ pub(super) async fn save_item(
         }
         Some(response) => response,
     }
+}
+
+/// Turns one feature of a module on or off, keeping its settings.
+pub(super) async fn feature_switch(
+    State(app): State<App>,
+    Path((id, module, part)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    axum::Form(form_data): axum::Form<HashMap<String, String>>,
+) -> Response {
+    let l = lang(&headers, &app);
+    let Some(actor) = user(&headers, &app) else {
+        return Redirect::to("/login").into_response();
+    };
+    let enabled = match form_data.get("enabled").map(String::as_str) {
+        Some("true") => true,
+        Some("false") => false,
+        _ => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+    };
+    let Some(key) = form::feature(&module, &part).filter(|_| valid_module(&module)) else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    };
+    for attempt in 0..2 {
+        let (mut stored, etag) = match app.api.basic_config(&id).await {
+            Ok(v) => v,
+            Err(e) => return api_error(&e, l, &headers),
+        };
+        let Some(etag) = etag else {
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
+        };
+        let changes = HashMap::from([(key.to_owned(), json!(enabled))]);
+        if form::update(&mut stored, &module, &changes).is_err() {
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
+        }
+        match app.api.put_basic_config(&id, stored, &etag, &actor).await {
+            Ok(_) => {
+                return Redirect::to(&super::modules::return_path(&app, &headers, &id))
+                    .into_response();
+            }
+            Err(e) if e.status == StatusCode::PRECONDITION_FAILED && attempt == 0 => {}
+            Err(e) => return api_error(&e, l, &headers),
+        }
+    }
+    conflict(&app, &headers, &id, &module, &part)
 }
