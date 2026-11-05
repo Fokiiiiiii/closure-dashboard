@@ -145,12 +145,13 @@ pub(crate) fn overview(
         let revoked = item["revoked"] == true;
         let _ = write!(
             body,
-            "<tr{}><td>#{}</td><td><span class=\"pill\"><i class=\"legend-dot series-{}\"></i>{}</span>{}</td><td class=\"mono\">{}</td><td class=\"mono\">{}</td><td class=\"reason\" title=\"{}\">{}</td><td>{when}</td></tr>",
+            "<tr{}><td>#{}</td><td><span class=\"pill\"><i class=\"legend-dot series-{}\"></i>{}</span>{}</td><td>{}</td><td>{}</td><td class=\"reason\" title=\"{}\">{}</td><td>{when}</td></tr>",
             if revoked { " class=\"muted\"" } else { "" },
             item["number"].as_u64().unwrap_or(0),
             index + 1,
             if index == 5 {
-                escape(kind)
+                l.find(&format!("ed-o-{kind}"))
+                    .unwrap_or_else(|| escape(kind))
             } else {
                 l.text(charts::KINDS[index].1)
             },
@@ -159,8 +160,8 @@ pub(crate) fn overview(
             } else {
                 String::new()
             },
-            escape(item["target"].as_str().unwrap_or("—")),
-            escape(item["moderator"].as_str().unwrap_or("—")),
+            super::short_id(item["target"].as_str().unwrap_or("")),
+            super::short_id(item["moderator"].as_str().unwrap_or("")),
             escape(reason),
             escape(reason)
         );

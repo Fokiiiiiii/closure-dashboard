@@ -182,7 +182,7 @@ pub(super) fn chart(
                 );
             }
         }
-        if days.len() <= 7 || i % days.len().div_ceil(7) == 0 || i + 1 == days.len() {
+        if days.len() <= 4 || i % days.len().div_ceil(5) == 0 || i + 1 == days.len() {
             let _ = write!(
                 svg,
                 "<text x=\"{:.2}\" y=\"149\" text-anchor=\"middle\">{label}</text>",

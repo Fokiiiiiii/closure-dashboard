@@ -1,6 +1,5 @@
 use super::shell;
 use crate::{
-    html::escape,
     i18n::{Locale, keys},
     session,
 };
@@ -125,10 +124,12 @@ pub(crate) fn history(
                 &mut changes,
             );
         }
+        // A save that changed nothing says nothing, so it is left out.
+        if changes.is_empty() && i + 1 != items.len() {
+            continue;
+        }
         let details = if i + 1 == items.len() {
             l.text(keys::INITIAL)
-        } else if changes.is_empty() {
-            l.text(keys::NO_CHANGE)
         } else {
             let mut result = String::new();
             let mut descriptions = Vec::new();
@@ -155,9 +156,9 @@ pub(crate) fn history(
             .map_or_else(|| "—".into(), |v| l.relative_time(v, session::now()));
         let _ = write!(
             body,
-            "<tr><td>#{}</td><td>{details}</td><td class=\"mono\">{}</td><td>{when}</td></tr>",
+            "<tr><td>#{}</td><td>{details}</td><td>{}</td><td>{when}</td></tr>",
             item["revision"].as_u64().unwrap_or(0),
-            escape(item["actor"].as_str().unwrap_or("—"))
+            super::short_id(item["actor"].as_str().unwrap_or(""))
         );
     }
     body.push_str("</tbody></table></div>");

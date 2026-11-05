@@ -123,6 +123,26 @@ fn role_fill(color: u64) -> String {
     }
 }
 
+/// A member's id as little as tells one from another: its last digits, with the whole id on hover.
+fn short_id(id: &str) -> String {
+    if id.is_empty() {
+        return "—".to_owned();
+    }
+    let tail: String = id
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!(
+        "<span class=\"mono\" title=\"{}\">…{}</span>",
+        escape(id),
+        escape(&tail)
+    )
+}
+
 fn first_sentence(description: &str) -> String {
     let description = description.trim_start();
     let end = description.find('。').map(|i| i + '。'.len_utf8());
