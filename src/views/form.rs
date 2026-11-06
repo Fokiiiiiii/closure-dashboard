@@ -294,6 +294,9 @@ fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &V
 fn column_title(l: Locale<'_>, name: &str) -> String {
     l.text(match name {
         "channel" => keys::COL_CHANNEL,
+        "role" => keys::COL_ROLE,
+        "level" => keys::COL_LEVEL,
+        "percent" => keys::COL_PERCENT,
         "after" => keys::COL_AFTER,
         "skip_pinned" => keys::COL_SKIP_PINNED,
         "emojis" => keys::COL_EMOJIS,
@@ -483,8 +486,8 @@ fn list_editor(
         out.push_str("<div class=\"list-row\">");
         for (c, (column, text)) in columns.iter().zip(texts).enumerate() {
             let mut schema = column.schema.clone();
-            if column.name == "channel" {
-                schema["x-ui"]["widget"] = json!("channel");
+            if matches!(column.name.as_str(), "channel" | "role") {
+                schema["x-ui"]["widget"] = json!(column.name);
             }
             let cell = Field {
                 name: format!("{prefix}{row}.{}", column.name),

@@ -513,3 +513,6 @@ ed-tpl-caps = 大文字の連呼
 ed-tpl-caps-hint = 英字の8割以上が大文字のメッセージを削除します。
 ed-tpl-words = 禁止語（ゆるい一致）
 ed-tpl-words-hint = b.a.d のように文字の間に別の文字を挟んだ書き方も拾います。追加後に語を書き換えて有効にしてください。
+col-role = ロール
+col-level = レベル
+col-percent = 倍率（％、100で等倍）

@@ -531,3 +531,6 @@ ed-tpl-caps = Shouting in capitals
 ed-tpl-caps-hint = Deletes messages where 80% or more of the letters are capitals.
 ed-tpl-words = Banned words (loose match)
 ed-tpl-words-hint = Also catches b.a.d, with other characters between the letters. It starts switched off: change the word, then switch it on.
+col-role = Role
+col-level = Level
+col-percent = Percent (100 is as it is)
