@@ -404,6 +404,8 @@ fn cell_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Bool(b)) => b.to_string(),
+        // A number is shown: left empty, a saved number would come back as no number at all.
+        Some(Value::Number(n)) => n.to_string(),
         Some(Value::Array(a)) => a
             .iter()
             .filter_map(Value::as_str)
@@ -680,4 +682,20 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         l.text(keys::SAVE)
     );
     shell(l, headers, id, guild, keys::MODULES, &body, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::cell_text;
+
+    #[test]
+    fn a_stored_number_is_shown_so_that_saving_keeps_it() {
+        assert_eq!(cell_text(Some(&json!(3))), "3");
+        assert_eq!(cell_text(Some(&json!(200))), "200");
+        assert_eq!(cell_text(Some(&json!("a"))), "a");
+        assert_eq!(cell_text(Some(&json!(true))), "true");
+        assert_eq!(cell_text(None), "");
+    }
 }
