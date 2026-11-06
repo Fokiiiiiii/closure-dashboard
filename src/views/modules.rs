@@ -53,6 +53,12 @@ pub(super) fn module_icon(module: &str) -> String {
         "moderation" => "M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6zM9 12l2 2 4-4",
         "remind" => "M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0",
         "tags" => "M3 12V4h8l10 10-8 8zM7.5 8h.01",
+        "roles" => "M12 3l2.5 5.5L20 9.3l-4 4 1 5.7-5-2.8L7 19l1-5.7-4-4 5.5-.8z",
+        "persist" => "M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5",
+        "utility" => {
+            "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"
+        }
+        "companion" => "M4 5h16v10H9l-5 4zM8 9h8M8 12h5",
         "welcome" => {
             "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"
         }
@@ -66,7 +72,19 @@ pub(super) fn module_icon(module: &str) -> String {
 /// The categories of the list, in the order shown, with the modules each one holds.
 const CATEGORIES: [(&str, &[&str]); 3] = [
     ("moderation", &["moderation", "automod", "logs"]),
-    ("community", &["welcome", "channels", "tags", "remind"]),
+    (
+        "community",
+        &[
+            "welcome",
+            "roles",
+            "persist",
+            "channels",
+            "companion",
+            "tags",
+            "remind",
+            "utility",
+        ],
+    ),
     ("system", &["diagnostics", "dashboard"]),
 ];
 
@@ -92,6 +110,10 @@ pub(super) fn module_name(l: Locale<'_>, module: &str) -> String {
         "channels" => l.text(keys::MOD_CHANNELS),
         "tags" => l.text(keys::MOD_TAGS),
         "remind" => l.text(keys::MOD_REMIND),
+        "roles" => l.text(keys::MOD_ROLES),
+        "persist" => l.text(keys::MOD_PERSIST),
+        "utility" => l.text(keys::MOD_UTILITY),
+        "companion" => l.text(keys::MOD_COMPANION),
         "diagnostics" => l.text(keys::MOD_DIAGNOSTICS),
         "dashboard" => l.text(keys::MOD_DASHBOARD),
         other => escape(other),
