@@ -516,3 +516,4 @@ ed-tpl-words-hint = b.a.d のように文字の間に別の文字を挟んだ書
 col-role = ロール
 col-level = レベル
 col-percent = 倍率（％、100で等倍）
+mod-giveaway = プレゼント企画

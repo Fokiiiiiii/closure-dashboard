@@ -534,3 +534,4 @@ ed-tpl-words-hint = Also catches b.a.d, with other characters between the letter
 col-role = Role
 col-level = Level
 col-percent = Percent (100 is as it is)
+mod-giveaway = Giveaways

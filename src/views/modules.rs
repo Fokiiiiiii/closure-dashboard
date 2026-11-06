@@ -66,6 +66,9 @@ pub(super) fn module_icon(module: &str) -> String {
         "leveling" => "M4 20V10M10 20V4M16 20v-7M22 20H2",
         "translate" => "M4 5h8M8 3v2M6 5c0 4 3 7 6 8M12 5c0 3-3 6-7 8M13 21l4-9 4 9M14.5 18h5",
         "post" => "M4 4h16v12H8l-4 4zM8 9h8M8 12h5",
+        "giveaway" => {
+            "M3 9h18v4H3zM5 13v8h14v-8M12 9v12M12 9c-2-4-6-4-6-1s4 1 6 1zM12 9c2-4 6-4 6-1s-4 1-6 1z"
+        }
         "welcome" => {
             "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"
         }
@@ -92,6 +95,7 @@ const CATEGORIES: [(&str, &[&str]); 3] = [
             "leveling",
             "translate",
             "post",
+            "giveaway",
             "tags",
             "remind",
             "utility",
@@ -131,6 +135,7 @@ pub(super) fn module_name(l: Locale<'_>, module: &str) -> String {
         "leveling" => l.text(keys::MOD_LEVELING),
         "translate" => l.text(keys::MOD_TRANSLATE),
         "post" => l.text(keys::MOD_POST),
+        "giveaway" => l.text(keys::MOD_GIVEAWAY),
         "diagnostics" => l.text(keys::MOD_DIAGNOSTICS),
         "dashboard" => l.text(keys::MOD_DASHBOARD),
         other => escape(other),
