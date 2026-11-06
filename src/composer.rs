@@ -327,6 +327,7 @@ pub fn parse_local(text: &str, behind_utc: i64) -> Option<i64> {
     let mut t = time.split(':').map(str::parse::<i64>);
     let (hour, minute) = (t.next()?.ok()?, t.next()?.ok()?);
     if d.next().is_some()
+        || t.next().is_some()
         || !(1..=12).contains(&month)
         || !(1..=31).contains(&day)
         || !(0..24).contains(&hour)
@@ -335,7 +336,12 @@ pub fn parse_local(text: &str, behind_utc: i64) -> Option<i64> {
     {
         return None;
     }
-    let local = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60;
+    let days = days_from_civil(year, month, day);
+    // A day the month has: the 31st of February comes back as the 3rd of March, and is no date.
+    if civil_from_days(days) != (year, month, day) {
+        return None;
+    }
+    let local = days * 86_400 + hour * 3600 + minute * 60;
     Some(local + behind_utc * 60)
 }
 
@@ -355,6 +361,20 @@ pub fn show_local(unix: i64, behind_utc: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_date_that_does_not_exist_or_has_more_than_the_minute_is_refused() {
+        assert!(parse_local("2026-02-28T10:00", 0).is_some());
+        assert!(parse_local("2028-02-29T10:00", 0).is_some());
+        for bad in [
+            "2026-02-31T10:00",
+            "2026-02-29T10:00",
+            "2026-04-31T10:00",
+            "2026-11-06T10:00:30",
+        ] {
+            assert_eq!(parse_local(bad, 0), None, "{bad}");
+        }
+    }
 
     fn sample() -> Value {
         json!({
