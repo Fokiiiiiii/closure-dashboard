@@ -59,6 +59,13 @@ pub(super) fn module_icon(module: &str) -> String {
             "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"
         }
         "companion" => "M4 5h16v10H9l-5 4zM8 9h8M8 12h5",
+        "linkexpand" => {
+            "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"
+        }
+        "starboard" => "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z",
+        "leveling" => "M4 20V10M10 20V4M16 20v-7M22 20H2",
+        "translate" => "M4 5h8M8 3v2M6 5c0 4 3 7 6 8M12 5c0 3-3 6-7 8M13 21l4-9 4 9M14.5 18h5",
+        "post" => "M4 4h16v12H8l-4 4zM8 9h8M8 12h5",
         "welcome" => {
             "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"
         }
@@ -80,6 +87,11 @@ const CATEGORIES: [(&str, &[&str]); 3] = [
             "persist",
             "channels",
             "companion",
+            "linkexpand",
+            "starboard",
+            "leveling",
+            "translate",
+            "post",
             "tags",
             "remind",
             "utility",
@@ -114,6 +126,11 @@ pub(super) fn module_name(l: Locale<'_>, module: &str) -> String {
         "persist" => l.text(keys::MOD_PERSIST),
         "utility" => l.text(keys::MOD_UTILITY),
         "companion" => l.text(keys::MOD_COMPANION),
+        "linkexpand" => l.text(keys::MOD_LINKEXPAND),
+        "starboard" => l.text(keys::MOD_STARBOARD),
+        "leveling" => l.text(keys::MOD_LEVELING),
+        "translate" => l.text(keys::MOD_TRANSLATE),
+        "post" => l.text(keys::MOD_POST),
         "diagnostics" => l.text(keys::MOD_DIAGNOSTICS),
         "dashboard" => l.text(keys::MOD_DASHBOARD),
         other => escape(other),
