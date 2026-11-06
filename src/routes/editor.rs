@@ -224,6 +224,21 @@ pub(super) async fn list_save(
         (Some("delete"), Some(key), _) => {
             map.remove(key);
         }
+        (Some("template"), Some(key), _) if part == "rules" => {
+            let name = l
+                .find(&format!("ed-tpl-{key}"))
+                .unwrap_or_else(|| key.to_owned());
+            let Some(rule) = crate::templates::rule(key, &name) else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
+            };
+            if map.len() >= editor::MAX_RULES {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
+            }
+            map.insert(
+                crate::templates::free_id(key, |id| map.contains_key(id)),
+                rule,
+            );
+        }
         (Some("toggle"), Some(key), Some(on)) if part == "rules" => {
             if let Some(rule) = map.get_mut(key).and_then(Value::as_object_mut) {
                 rule.insert("enabled".into(), json!(on == "true"));

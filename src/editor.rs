@@ -81,6 +81,9 @@ pub enum Why {
 pub type Errors = Vec<(String, Why)>;
 
 /// The names of rules, counters and anti-raid levels: plain characters.
+/// The most rules a server can have.
+pub const MAX_RULES: usize = 100;
+
 pub const ID_PATTERN: &str = "^[a-z0-9_-]{1,32}$";
 
 /// A schema node without the `null` alternative and the single-branch `allOf`, with the keywords

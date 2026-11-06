@@ -336,3 +336,8 @@ td { overflow-wrap:anywhere; }
 .dc-buttons { display:flex; flex-wrap:wrap; gap:6px; margin-block-start:8px; }
 .dc-button { padding:4px 12px; border-radius:6px; background:#4e5058; color:#fff; font-size:13px; font-weight:500; }
 @media (max-width:640px) { .cp-section .cp-row, .cp-waiting { grid-template-columns:minmax(0,1fr) !important; } }
+.ed-templates { margin-block-start:20px; display:grid; gap:10px; }
+.ed-templates h2 { margin:0; font-size:16px; }
+.tpl-list { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.tpl { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-block-start:1px solid var(--line); }
+.tpl p { margin:2px 0 0; font-size:13px; }

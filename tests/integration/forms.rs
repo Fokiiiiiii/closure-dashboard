@@ -245,6 +245,60 @@ async fn rules_are_cards_and_not_text() {
 }
 
 #[tokio::test]
+async fn a_recommended_rule_is_added_with_one_button_under_a_free_id() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.structured = true;
+    }
+    let rules = "/g/42/modules/automod/rules";
+    let page = html(response(&config, Method::GET, rules, "").await).await;
+    for expected in [
+        "おすすめのルール",
+        "他サーバーの招待リンク",
+        "value=\"template:invites\"",
+        "value=\"template:words\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    let added = response(
+        &config,
+        Method::POST,
+        rules,
+        "etag=%221%22&op=template%3Ainvites",
+    )
+    .await;
+    assert_eq!(added.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    let rule = &sent["modules"]["automod"]["config"]["rules"]["invites"];
+    assert_eq!(rule["name"], "他サーバーの招待リンク");
+    assert_eq!(rule["triggers"], json!([{"type": "invites"}]));
+    assert_eq!(rule["actions"][0], json!({"do": "delete"}));
+    // A word list needs the writer's words, so it starts switched off.
+    response(
+        &config,
+        Method::POST,
+        rules,
+        "etag=%221%22&op=template%3Awords",
+    )
+    .await;
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["automod"]["config"]["rules"]["words"]["enabled"],
+        false
+    );
+    let unknown = response(
+        &config,
+        Method::POST,
+        rules,
+        "etag=%221%22&op=template%3Anothing",
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn the_anti_raid_and_each_feature_have_a_switch_of_their_own() {
     let (config, state) = setup().await;
     {

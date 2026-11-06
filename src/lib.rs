@@ -10,6 +10,7 @@ pub mod html;
 pub mod i18n;
 pub mod routes;
 pub mod session;
+pub mod templates;
 mod views;
 
 pub use routes::router;

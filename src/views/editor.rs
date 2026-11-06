@@ -861,7 +861,33 @@ pub(crate) fn collection_page(
         );
     }
     body.push_str("</ul>");
+    if part == "rules" {
+        body.push_str(&templates_card(l, &base, etag));
+    }
     shell(l, headers, id, guild, keys::MODULES, &body, true)
+}
+
+/// The ready-made rules, each with a button that adds it.
+fn templates_card(l: Locale<'_>, base: &str, etag: &str) -> String {
+    let mut out = format!(
+        "<section class=\"card ed-templates\"><h2>{}</h2><p class=\"muted\">{}</p><ul class=\"tpl-list\">",
+        l.text(keys::ED_TPL_HEADING),
+        l.text(keys::ED_TPL_HINT)
+    );
+    for key in crate::templates::KEYS {
+        let _ = write!(
+            out,
+            "<li class=\"tpl\"><div><strong>{}</strong><p class=\"muted\">{}</p></div><form method=\"post\" action=\"{}\"><input type=\"hidden\" name=\"etag\" value=\"{}\"><button class=\"button secondary\" type=\"submit\" name=\"op\" value=\"template:{key}\">＋ {}</button></form></li>",
+            l.find(&format!("ed-tpl-{key}"))
+                .unwrap_or_else(|| key.to_owned()),
+            l.find(&format!("ed-tpl-{key}-hint")).unwrap_or_default(),
+            escape(base),
+            escape(etag),
+            l.text(keys::ED_TPL_ADD)
+        );
+    }
+    out.push_str("</ul></section>");
+    out
 }
 
 /// The summary line of a rule: its conditions and its actions, by name.
