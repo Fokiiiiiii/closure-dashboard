@@ -159,7 +159,9 @@ fn first_sentence(description: &str) -> String {
     }
 }
 
-pub(crate) use composer::{Side as ComposerSide, composer_page, preview as composer_preview};
+pub(crate) use composer::{
+    Side as ComposerSide, Waiting as ComposerWaiting, composer_page, preview as composer_preview,
+};
 pub(crate) use editor::{
     Ctx, Item, collection_page, datalist_html, editor_field, editor_node, editor_page, object_card,
     rule_body, rule_summary,

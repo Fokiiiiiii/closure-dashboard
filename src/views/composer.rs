@@ -283,6 +283,18 @@ pub(crate) fn preview(l: Locale<'_>, form: &Form, samples: &[(String, String)]) 
             l.text(keys::CP_EMPTY)
         );
     }
+    let buttons = composer::parse(form)["buttons"].clone();
+    if let Some(buttons) = buttons.as_array() {
+        out.push_str("<div class=\"dc-buttons\">");
+        for button in buttons {
+            let _ = write!(
+                out,
+                "<span class=\"dc-button\">{}</span>",
+                escape(button["label"].as_str().unwrap_or(""))
+            );
+        }
+        out.push_str("</div>");
+    }
     out.push_str("</div></div>");
     let size = composer::parse(form)["embeds"]
         .as_array()
@@ -320,6 +332,79 @@ fn input(name: &str, form: &Form, label: &str, kind: &str, extra: &str) -> Strin
         escape(name),
         escape(get(form, name))
     )
+}
+
+/// The rows of role buttons, and the button that adds one.
+fn buttons_card(l: Locale<'_>, form: &Form, roles: &[(String, String)]) -> String {
+    let mut out = format!(
+        "<section class=\"card cp-section\"><h3>{}</h3><p class=\"cp-hint\">{}</p>",
+        l.text(keys::CP_BUTTONS),
+        l.text(keys::CP_BUTTONS_HINT)
+    );
+    let rows = composer::numbers(form, "b");
+    for n in &rows {
+        let chosen = get(form, &format!("b.{n}.role"));
+        let mut select = format!(
+            "<select name=\"b.{n}.role\" aria-label=\"{}\"><option value=\"\">{}</option>",
+            l.text(keys::CP_BUTTON_ROLE),
+            l.text(keys::UNSET)
+        );
+        for (rid, name) in roles {
+            let _ = write!(
+                select,
+                "<option value=\"{}\"{}>{}</option>",
+                escape(rid),
+                if rid == chosen { " selected" } else { "" },
+                escape(name)
+            );
+        }
+        select.push_str("</select>");
+        let _ = write!(
+            out,
+            "<div class=\"cp-row\"><input type=\"hidden\" name=\"b.{n}.__\" value=\"1\"><input type=\"text\" name=\"b.{n}.label\" value=\"{}\" maxlength=\"80\" placeholder=\"{}\" aria-label=\"{}\">{select}<button class=\"button ghost\" type=\"submit\" name=\"op\" value=\"del:b.{n}\" aria-label=\"{}\">✕</button></div>",
+            escape(get(form, &format!("b.{n}.label"))),
+            l.text(keys::CP_BUTTON_LABEL),
+            l.text(keys::CP_BUTTON_LABEL),
+            l.text(keys::CP_REMOVE)
+        );
+    }
+    if rows.len() < composer::MAX_BUTTONS {
+        let _ = write!(
+            out,
+            "<button class=\"button secondary cp-add\" type=\"submit\" name=\"op\" value=\"add_button\">＋ {}</button>",
+            l.text(keys::CP_ADD_BUTTON)
+        );
+    }
+    out.push_str("</section>");
+    out
+}
+
+/// The posts waiting for their time, each with a button that takes it back.
+fn waiting_card(l: Locale<'_>, waiting: &[Waiting]) -> String {
+    let mut out = format!(
+        "<section class=\"card cp-section\"><h3>{}</h3>",
+        l.text(keys::CP_SCHEDULED)
+    );
+    if waiting.is_empty() {
+        let _ = write!(
+            out,
+            "<p class=\"cp-hint\">{}</p>",
+            l.text(keys::CP_NONE_WAITING)
+        );
+    }
+    for post in waiting {
+        let _ = write!(
+            out,
+            "<div class=\"cp-row cp-waiting\"><span class=\"cp-when\">{}</span><span class=\"cp-where\"># {}</span><span class=\"cp-what\">{}</span><button class=\"button ghost\" type=\"submit\" name=\"op\" value=\"unschedule:{}\">{}</button></div>",
+            escape(&post.when),
+            escape(&post.channel),
+            escape(&post.preview),
+            escape(&post.key),
+            l.text(keys::CP_UNSCHEDULE)
+        );
+    }
+    out.push_str("</section>");
+    out
 }
 
 fn swatches(l: Locale<'_>, form: &Form, e: &str) -> String {
@@ -516,18 +601,34 @@ fn embed_card(l: Locale<'_>, form: &Form, n: usize) -> String {
     out
 }
 
+/// A post that waits for its time, as the list shows it.
+pub(crate) struct Waiting {
+    pub key: String,
+    pub when: String,
+    pub channel: String,
+    pub preview: String,
+}
+
 /// What the composer shows apart from the message: where it goes, or what its variables are.
 pub(crate) enum Side<'a> {
     /// A message to send now: the text channels to choose from, and the one chosen.
     Send {
         channels: Vec<(String, String)>,
+        roles: Vec<(String, String)>,
         chosen: &'a str,
+        /// What was typed to name the message to replace; empty to send a new one.
+        edit: &'a str,
+        /// The `datetime-local` value of the time to send at.
+        when: &'a str,
+        /// How many minutes the browser is behind UTC, as it said.
+        zone: &'a str,
+        waiting: Vec<Waiting>,
     },
     /// A setting that holds a message: the variables it may use, with their examples.
     Setting { variables: &'a [String] },
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn composer_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -552,8 +653,17 @@ pub(crate) fn composer_page(
         );
     }
     let mut left = String::new();
+    let mut pending = None;
     match side {
-        Side::Send { channels, chosen } => {
+        Side::Send {
+            channels,
+            roles,
+            chosen,
+            edit,
+            when,
+            zone,
+            waiting,
+        } => {
             let mut select = format!(
                 "<label class=\"cp-input\"><span>{}</span><select name=\"channel\">",
                 l.text(keys::CP_CHANNEL)
@@ -575,8 +685,16 @@ pub(crate) fn composer_page(
             select.push_str("</select></label>");
             let _ = write!(
                 left,
-                "<section class=\"card cp-section\">{select}</section>"
+                "<section class=\"card cp-section\">{select}<label class=\"cp-input\"><span>{}</span><input type=\"text\" name=\"edit\" value=\"{}\" placeholder=\"https://discord.com/channels/…\" autocomplete=\"off\"><small class=\"cp-hint\">{}</small></label><label class=\"cp-input\"><span>{}</span><input type=\"datetime-local\" name=\"when\" value=\"{}\"><small class=\"cp-hint\">{}</small></label><input type=\"hidden\" name=\"tz\" value=\"{}\"></section>",
+                l.text(keys::CP_EDIT_TARGET),
+                escape(edit),
+                l.text(keys::CP_EDIT_HINT),
+                l.text(keys::CP_WHEN),
+                escape(when),
+                l.text(keys::CP_WHEN_HINT),
+                escape(zone)
             );
+            pending = Some((roles, waiting));
         }
         Side::Setting { variables } => {
             let mut chips = String::new();
@@ -614,6 +732,18 @@ pub(crate) fn composer_page(
             l.text(keys::CP_ADD_EMBED)
         );
     }
+    if let Some((roles, waiting)) = pending {
+        left.push_str(&buttons_card(l, form, roles));
+        left.push_str(&waiting_card(l, waiting));
+    }
+    let schedule = if matches!(side, Side::Send { .. }) {
+        format!(
+            "<button class=\"button secondary\" type=\"submit\" name=\"op\" value=\"schedule\">{}</button>",
+            l.text(keys::CP_SCHEDULE)
+        )
+    } else {
+        String::new()
+    };
     let (done_key, done_op) = match side {
         Side::Send { .. } => (keys::CP_SEND, "send"),
         Side::Setting { .. } => (keys::SAVE, "save"),
@@ -627,7 +757,7 @@ pub(crate) fn composer_page(
     });
     let _ = write!(
         body,
-        "<form method=\"post\" action=\"{action}\" class=\"composer\" data-preview=\"{action}?preview=1\"><button class=\"sr-only\" type=\"submit\" name=\"op\" value=\"{done_op}\" tabindex=\"-1\" aria-hidden=\"true\"></button><div class=\"composer-edit\">{left}</div><aside class=\"composer-side\"><div class=\"cp-preview-label\">{}</div><div id=\"preview\">{}</div></aside><div class=\"save-bar\">{back_link}<button class=\"button primary\" type=\"submit\" name=\"op\" value=\"{done_op}\">{}</button></div></form>",
+        "<form method=\"post\" action=\"{action}\" class=\"composer\" data-preview=\"{action}?preview=1\"><button class=\"sr-only\" type=\"submit\" name=\"op\" value=\"{done_op}\" tabindex=\"-1\" aria-hidden=\"true\"></button><div class=\"composer-edit\">{left}</div><aside class=\"composer-side\"><div class=\"cp-preview-label\">{}</div><div id=\"preview\">{}</div></aside><div class=\"save-bar\">{back_link}{schedule}<button class=\"button primary\" type=\"submit\" name=\"op\" value=\"{done_op}\">{}</button></div></form>",
         l.text(keys::CP_PREVIEW),
         preview(l, form, samples),
         l.text(done_key),

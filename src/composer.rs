@@ -11,6 +11,7 @@ pub type Form = HashMap<String, String>;
 
 pub const MAX_EMBEDS: usize = 10;
 pub const MAX_FIELDS: usize = 25;
+pub const MAX_BUTTONS: usize = 25;
 
 /// The colours offered as swatches: the value, and the name of its tooltip.
 pub const COLORS: [(&str, &str); 6] = [
@@ -41,6 +42,17 @@ pub fn flatten(value: &Value) -> Form {
         return form;
     }
     put(&mut form, "c".into(), text(value, "content"));
+    for (n, button) in value["buttons"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let b = format!("b.{n}");
+        form.insert(format!("{b}.__"), "1".into());
+        put(&mut form, format!("{b}.label"), text(button, "label"));
+        put(&mut form, format!("{b}.role"), text(button, "role"));
+    }
     for (n, embed) in value["embeds"].as_array().into_iter().flatten().enumerate() {
         let e = format!("e.{n}");
         form.insert(format!("{e}.__"), "1".into());
@@ -113,6 +125,13 @@ fn next(form: &Form, prefix: &str) -> usize {
 pub fn add_embed(form: &mut Form) {
     if numbers(form, "e").len() < MAX_EMBEDS {
         form.insert(format!("e.{}.__", next(form, "e")), "1".into());
+    }
+}
+
+/// Adds an empty role button, up to the most Discord takes.
+pub fn add_button(form: &mut Form) {
+    if numbers(form, "b").len() < MAX_BUTTONS {
+        form.insert(format!("b.{}.__", next(form, "b")), "1".into());
     }
 }
 
@@ -211,6 +230,17 @@ pub fn parse(form: &Form) -> Value {
     if !embeds.is_empty() {
         message.insert("embeds".into(), Value::Array(embeds));
     }
+    let buttons: Vec<Value> = numbers(form, "b")
+        .into_iter()
+        .filter_map(|n| {
+            let label = value(form, &format!("b.{n}.label"));
+            let role = value(form, &format!("b.{n}.role"));
+            (!label.is_empty() || !role.is_empty()).then(|| json!({"label": label, "role": role}))
+        })
+        .collect();
+    if !buttons.is_empty() {
+        message.insert("buttons".into(), Value::Array(buttons));
+    }
     Value::Object(message)
 }
 
@@ -230,6 +260,98 @@ pub fn setting(message: Value) -> Value {
     message
 }
 
+/// The message id in what was typed: the id itself, or the link Discord gives a message
+/// (`https://discord.com/channels/<server>/<channel>/<message>`), which also names the channel.
+#[must_use]
+pub fn message_ref(text: &str) -> Option<(Option<String>, String)> {
+    let text = text.trim();
+    let digits = |s: &str| !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit());
+    if digits(text) {
+        return Some((None, text.to_owned()));
+    }
+    let path = text
+        .strip_prefix("https://discord.com/channels/")
+        .or_else(|| text.strip_prefix("https://canary.discord.com/channels/"))
+        .or_else(|| text.strip_prefix("https://ptb.discord.com/channels/"))?;
+    let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    match parts.as_slice() {
+        [guild, channel, message] if digits(guild) && digits(channel) && digits(message) => {
+            Some((Some((*channel).to_owned()), (*message).to_owned()))
+        }
+        _ => None,
+    }
+}
+
+/// The days since 1970-01-01 of a calendar date (proleptic Gregorian).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The calendar date of a count of days since 1970-01-01.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
+/// Where a browser is: how many minutes it is behind UTC (what `Date.getTimezoneOffset` says,
+/// so Tokyo is `-540`). Anything unreadable is Tokyo, where the dashboard's users are.
+#[must_use]
+pub fn zone_minutes(text: &str) -> i64 {
+    text.trim()
+        .parse::<i64>()
+        .ok()
+        .filter(|m| (-840..=720).contains(m))
+        .unwrap_or(-540)
+}
+
+/// The Unix second of a `YYYY-MM-DDTHH:MM` the writer typed, in the zone `behind_utc` minutes behind UTC.
+#[must_use]
+pub fn parse_local(text: &str, behind_utc: i64) -> Option<i64> {
+    let (date, time) = text.trim().split_once('T')?;
+    let mut d = date.split('-').map(str::parse::<i64>);
+    let (year, month, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let mut t = time.split(':').map(str::parse::<i64>);
+    let (hour, minute) = (t.next()?.ok()?, t.next()?.ok()?);
+    if d.next().is_some()
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..24).contains(&hour)
+        || !(0..60).contains(&minute)
+        || !(1970..=9999).contains(&year)
+    {
+        return None;
+    }
+    let local = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60;
+    Some(local + behind_utc * 60)
+}
+
+/// A Unix second as `YYYY-MM-DD HH:MM` in the zone `behind_utc` minutes behind UTC.
+#[must_use]
+pub fn show_local(unix: i64, behind_utc: i64) -> String {
+    let local = unix - behind_utc * 60;
+    let (year, month, day) = civil_from_days(local.div_euclid(86_400));
+    let seconds = local.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        seconds / 3600,
+        seconds % 3600 / 60
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +366,52 @@ mod tests {
                 "fields": [{"name": "n", "value": "v", "inline": true}, {"name": "m", "value": "w", "inline": false}]
             }]
         })
+    }
+
+    #[test]
+    fn role_buttons_are_read_from_their_rows_and_empty_rows_are_left_out() {
+        let mut form = Form::new();
+        add_button(&mut form);
+        add_button(&mut form);
+        add_button(&mut form);
+        form.insert("c".into(), "pick".into());
+        form.insert("b.0.label".into(), "News".into());
+        form.insert("b.0.role".into(), "9".into());
+        form.insert("b.2.label".into(), "Games".into());
+        form.insert("b.2.role".into(), "10".into());
+        assert_eq!(
+            parse(&form)["buttons"],
+            json!([{"label": "News", "role": "9"}, {"label": "Games", "role": "10"}])
+        );
+        remove(&mut form, "b.0");
+        assert_eq!(parse(&form)["buttons"].as_array().unwrap().len(), 1);
+        assert_eq!(flatten(&parse(&form))["b.0.role"], "10");
+    }
+
+    #[test]
+    fn a_message_is_named_by_its_id_or_its_link() {
+        assert_eq!(message_ref(" 123 "), Some((None, "123".into())));
+        assert_eq!(
+            message_ref("https://discord.com/channels/1/22/333"),
+            Some((Some("22".into()), "333".into()))
+        );
+        assert_eq!(message_ref("https://example.com/channels/1/22/333"), None);
+        assert_eq!(message_ref("12x"), None);
+        assert_eq!(message_ref("https://discord.com/channels/1/22"), None);
+    }
+
+    #[test]
+    fn a_local_time_goes_to_unix_seconds_and_back() {
+        // 2026-11-06 09:30 in Tokyo (540 minutes ahead of UTC) is 00:30 UTC.
+        let unix = parse_local("2026-11-06T09:30", -540).unwrap();
+        assert_eq!(unix, 1_793_925_000);
+        assert_eq!(show_local(unix, -540), "2026-11-06 09:30");
+        assert_eq!(show_local(unix, 0), "2026-11-06 00:30");
+        assert_eq!(parse_local("1969-12-31T23:59", 0), None);
+        assert_eq!(parse_local("2026-13-01T00:00", 0), None);
+        assert_eq!(parse_local("soon", 0), None);
+        assert_eq!(zone_minutes("x"), -540);
+        assert_eq!(zone_minutes("300"), 300);
     }
 
     #[test]

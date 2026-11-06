@@ -15,21 +15,33 @@ use crate::{
 struct Posted {
     form: Form,
     op: String,
-    channel: String,
+    keep: Keep,
     etag: Option<String>,
+}
+
+/// What of a send page is kept when it is shown again: the inputs that are not the message.
+#[derive(Default)]
+struct Keep {
+    channel: String,
+    edit: String,
+    when: String,
+    zone: String,
 }
 
 fn posted(pairs: Vec<(String, String)>) -> Posted {
     let mut out = Posted {
         form: Form::new(),
         op: String::new(),
-        channel: String::new(),
+        keep: Keep::default(),
         etag: None,
     };
     for (name, value) in pairs {
         match name.as_str() {
             "op" => out.op = value,
-            "channel" => out.channel = value,
+            "channel" => out.keep.channel = value,
+            "edit" => out.keep.edit = value,
+            "when" => out.keep.when = value,
+            "tz" => out.keep.zone = value,
             "etag" => out.etag = Some(value),
             _ => {
                 out.form.insert(name, value);
@@ -43,9 +55,14 @@ fn posted(pairs: Vec<(String, String)>) -> Posted {
 fn edit(form: &mut Form, op: &str) -> bool {
     if op == "add_embed" {
         composer::add_embed(form);
+    } else if op == "add_button" {
+        composer::add_button(form);
     } else if let Some(n) = op.strip_prefix("addf:").and_then(|n| n.parse().ok()) {
         composer::add_field(form, n);
-    } else if let Some(row) = op.strip_prefix("del:").filter(|r| r.starts_with("e.")) {
+    } else if let Some(row) = op
+        .strip_prefix("del:")
+        .filter(|r| r.starts_with("e.") || r.starts_with("b."))
+    {
         composer::remove(form, row);
     } else {
         return false;
@@ -62,6 +79,16 @@ fn samples(l: crate::i18n::Locale<'_>, names: &[String]) -> Vec<(String, String)
                 .unwrap_or_else(|| format!("{{{name}}}"));
             (name.clone(), sample)
         })
+        .collect()
+}
+
+fn roles(directory: Option<&Value>) -> Vec<(String, String)> {
+    directory
+        .map(|d| &d["roles"])
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|r| Some((r["id"].as_str()?.to_owned(), r["name"].as_str()?.to_owned())))
         .collect()
 }
 
@@ -85,7 +112,53 @@ pub(super) async fn send_page(
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    send_view(&app, &id, &headers, Form::new(), String::new(), Vec::new()).await
+    send_view(
+        &app,
+        &id,
+        &headers,
+        Form::new(),
+        Keep::default(),
+        Vec::new(),
+    )
+    .await
+}
+
+/// The posts that wait for their time, named for the list.
+async fn waiting(
+    app: &App,
+    id: &str,
+    actor: Option<&str>,
+    channels: &[(String, String)],
+    zone: i64,
+) -> Vec<views::ComposerWaiting> {
+    let Some(actor) = actor else {
+        return Vec::new();
+    };
+    let Ok((posts, _)) = app.api.scheduled_posts(id, actor).await else {
+        return Vec::new();
+    };
+    posts["posts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|post| {
+            let channel = post["channel_id"].as_str()?;
+            let name = channels
+                .iter()
+                .find(|(cid, _)| cid == channel)
+                .map_or_else(|| channel.to_owned(), |(_, name)| name.clone());
+            let text = post["message"]["content"]
+                .as_str()
+                .or_else(|| post["message"]["embeds"][0]["title"].as_str())
+                .unwrap_or("");
+            Some(views::ComposerWaiting {
+                key: post["key"].as_str()?.to_owned(),
+                when: composer::show_local(post["send_at"].as_i64()?, zone),
+                channel: name,
+                preview: text.chars().take(60).collect(),
+            })
+        })
+        .collect()
 }
 
 async fn send_view(
@@ -93,7 +166,7 @@ async fn send_view(
     id: &str,
     headers: &HeaderMap,
     form: Form,
-    channel: String,
+    keep: Keep,
     banners: Vec<(bool, String)>,
 ) -> Response {
     let l = lang(headers, app);
@@ -102,9 +175,24 @@ async fn send_view(
         return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, headers);
     };
     let directory = directory.ok().map(|v| v.0);
+    let channels = text_channels(directory.as_ref());
+    let actor = user(headers, app);
+    let waiting = waiting(
+        app,
+        id,
+        actor.as_deref(),
+        &channels,
+        composer::zone_minutes(&keep.zone),
+    )
+    .await;
     let side = views::ComposerSide::Send {
-        channels: text_channels(directory.as_ref()),
-        chosen: &channel,
+        channels,
+        roles: roles(directory.as_ref()),
+        chosen: &keep.channel,
+        edit: &keep.edit,
+        when: &keep.when,
+        zone: &keep.zone,
+        waiting,
     };
     Html(views::composer_page(
         l,
@@ -122,59 +210,32 @@ async fn send_view(
     .into_response()
 }
 
-pub(super) async fn send_post(
-    State(app): State<App>,
-    Path(id): Path<String>,
-    Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-    axum::Form(pairs): axum::Form<Vec<(String, String)>>,
-) -> Response {
-    let l = lang(&headers, &app);
-    let mut request = posted(pairs);
-    if query.contains_key("preview") {
-        return fragment(l, &request.form, &[]);
-    }
-    if edit(&mut request.form, &request.op) {
-        return send_view(
-            &app,
-            &id,
-            &headers,
-            request.form,
-            request.channel,
-            Vec::new(),
-        )
-        .await;
-    }
-    if request.op != "send" {
-        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
-    }
-    let Some(actor) = user(&headers, &app) else {
-        return Redirect::to("/login").into_response();
-    };
-    let message = composer::parse(&request.form);
-    let problem = if request.channel.is_empty() {
-        Some(l.text(keys::CP_CHOOSE_CHANNEL))
-    } else if message.as_object().is_some_and(serde_json::Map::is_empty) {
-        Some(l.text(keys::CP_NOTHING))
-    } else {
-        None
-    };
-    if let Some(problem) = problem {
-        let banners = vec![(false, problem)];
-        return send_view(&app, &id, &headers, request.form, request.channel, banners).await;
-    }
-    let banner = match app
-        .api
-        .send_message(&id, &request.channel, message, &actor)
-        .await
-    {
+/// What the page says after a post: sent, replaced, scheduled, or why not.
+fn sent_banner(
+    l: crate::i18n::Locale<'_>,
+    result: Result<(Value, Option<String>), crate::closure_api::ApiError>,
+    (edited, send_at, zone): (bool, Option<i64>, i64),
+) -> (bool, String) {
+    match result {
+        Ok(_) if send_at.is_some() => (
+            true,
+            format!(
+                "{} {}",
+                l.text(keys::CP_QUEUED),
+                escape(&composer::show_local(send_at.unwrap_or_default(), zone))
+            ),
+        ),
         Ok((sent, _)) => {
             let url = sent["url"].as_str().unwrap_or("");
+            let said = if edited {
+                l.text(keys::CP_EDITED)
+            } else {
+                l.text(keys::CP_SENT)
+            };
             (
                 true,
                 format!(
-                    "{} <a href=\"{}\" rel=\"noopener noreferrer\" target=\"_blank\">{}</a>",
-                    l.text(keys::CP_SENT),
+                    "{said} <a href=\"{}\" rel=\"noopener noreferrer\" target=\"_blank\">{}</a>",
                     escape(url),
                     l.text(keys::CP_OPEN)
                 ),
@@ -188,16 +249,90 @@ pub(super) async fn send_post(
                 e.message
             }),
         ),
+    }
+}
+
+pub(super) async fn send_post(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    axum::Form(pairs): axum::Form<Vec<(String, String)>>,
+) -> Response {
+    let l = lang(&headers, &app);
+    let mut request = posted(pairs);
+    if query.contains_key("preview") {
+        return fragment(l, &request.form, &[]);
+    }
+    if edit(&mut request.form, &request.op) {
+        return send_view(&app, &id, &headers, request.form, request.keep, Vec::new()).await;
+    }
+    let Some(actor) = user(&headers, &app) else {
+        return Redirect::to("/login").into_response();
     };
-    send_view(
-        &app,
-        &id,
-        &headers,
-        request.form,
-        request.channel,
-        vec![banner],
-    )
-    .await
+    if let Some(key) = request.op.strip_prefix("unschedule:") {
+        let valid = key.starts_with('p')
+            && key.len() <= 40
+            && key[1..].bytes().all(|b| b.is_ascii_hexdigit());
+        let banner = if valid && app.api.cancel_post(&id, key, &actor).await.is_ok() {
+            (true, l.text(keys::CP_UNSCHEDULED))
+        } else {
+            (false, l.text(keys::INVALID))
+        };
+        return send_view(
+            &app,
+            &id,
+            &headers,
+            request.form,
+            request.keep,
+            vec![banner],
+        )
+        .await;
+    }
+    if request.op != "send" && request.op != "schedule" {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    }
+    let message = composer::parse(&request.form);
+    let zone = composer::zone_minutes(&request.keep.zone);
+    let target = request.keep.edit.trim();
+    let reference = (!target.is_empty()).then(|| composer::message_ref(target));
+    let send_at = (request.op == "schedule")
+        .then(|| composer::parse_local(&request.keep.when, zone))
+        .map(|at| at.filter(|at| *at > 0));
+    let channel = match &reference {
+        Some(Some((Some(from_link), _))) => from_link.clone(),
+        _ => request.keep.channel.clone(),
+    };
+    let problem = if reference == Some(None) {
+        Some(l.text(keys::CP_BAD_EDIT))
+    } else if send_at == Some(None) {
+        Some(l.text(keys::CP_BAD_TIME))
+    } else if channel.is_empty() {
+        Some(l.text(keys::CP_CHOOSE_CHANNEL))
+    } else if message.as_object().is_some_and(serde_json::Map::is_empty) {
+        Some(l.text(keys::CP_NOTHING))
+    } else {
+        None
+    };
+    if let Some(problem) = problem {
+        let banners = vec![(false, problem)];
+        return send_view(&app, &id, &headers, request.form, request.keep, banners).await;
+    }
+    let edit_id = reference.flatten().map(|(_, message_id)| message_id);
+    let send_at = send_at.flatten();
+    let post = crate::closure_api::Post {
+        channel: &channel,
+        message: &message,
+        edit: edit_id.as_deref(),
+        send_at,
+    };
+    let result = app.api.send_message(&id, &post, &actor).await;
+    let banner = sent_banner(l, result, (edit_id.is_some(), send_at, zone));
+    let mut keep = request.keep;
+    if send_at.is_some() {
+        keep.when.clear();
+    }
+    send_view(&app, &id, &headers, request.form, keep, vec![banner]).await
 }
 
 /// The setting of a module that holds a message, and the variables it may use.

@@ -1,4 +1,11 @@
 (() => {
+  // The zone of the browser, so that a time typed for a scheduled post means the writer's own.
+  for (const input of document.querySelectorAll('input[name="tz"]')) {
+    input.value = String(new Date().getTimezoneOffset());
+  }
+})();
+
+(() => {
   const form = document.querySelector("form[data-preview]");
   const target = document.getElementById("preview");
   if (!form || !target) return;

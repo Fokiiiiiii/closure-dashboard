@@ -12,6 +12,16 @@ use hyper_util::{
 use serde_json::Value;
 use std::time::Duration;
 
+/// A message to post: where, what, which message of the bot to replace, and when.
+#[derive(Debug)]
+pub struct Post<'a> {
+    pub channel: &'a str,
+    pub message: &'a Value,
+    pub edit: Option<&'a str>,
+    /// Unix seconds; `None` sends now.
+    pub send_at: Option<i64>,
+}
+
 #[derive(Clone)]
 pub struct Api {
     client: Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>,
@@ -320,14 +330,57 @@ impl Api {
     pub async fn send_message(
         &self,
         guild: &str,
-        channel: &str,
-        message: Value,
+        post: &Post<'_>,
         actor: &str,
     ) -> Result<(Value, Option<String>), ApiError> {
+        let mut body = serde_json::json!({"channel_id": post.channel, "message": post.message});
+        if let Some(edit) = post.edit {
+            body["edit"] = serde_json::json!(edit);
+        }
+        if let Some(at) = post.send_at {
+            body["send_at"] = serde_json::json!(at);
+        }
         self.request(
             Method::POST,
             &format!("/v1/guilds/{guild}/messages"),
-            Some(serde_json::json!({"channel_id": channel, "message": message})),
+            Some(body),
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// The posts of the server that wait for their time.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn scheduled_posts(
+        &self,
+        guild: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/scheduled-posts"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// Takes a waiting post back.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn cancel_post(
+        &self,
+        guild: &str,
+        key: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::DELETE,
+            &format!("/v1/guilds/{guild}/scheduled-posts/{key}"),
+            None,
             None,
             Some(actor),
         )

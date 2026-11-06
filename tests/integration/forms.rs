@@ -403,6 +403,84 @@ async fn a_message_is_written_previewed_and_sent_from_the_composer() {
 }
 
 #[tokio::test]
+async fn a_post_can_carry_role_buttons_replace_a_message_and_wait_for_its_time() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let page = html(response(&config, Method::GET, "/g/42/compose", "").await).await;
+    for expected in [
+        "name=\"edit\"",
+        "name=\"when\"",
+        "name=\"tz\"",
+        "value=\"schedule\"",
+        "value=\"add_button\"",
+    ] {
+        assert!(page.contains(expected), "{expected}");
+    }
+    let page =
+        html(response(&config, Method::POST, "/g/42/compose", "op=add_button&c=hi").await).await;
+    assert!(page.contains("name=\"b.0.label\"") && page.contains("name=\"b.0.role\""));
+
+    let fragment = html(
+        response(
+            &config,
+            Method::POST,
+            "/g/42/compose?preview=1",
+            "c=hi&b.0.__=1&b.0.label=%3Cb%3ENews&b.0.role=9",
+        )
+        .await,
+    )
+    .await;
+    assert!(fragment.contains("dc-button") && fragment.contains("&lt;b&gt;News"));
+
+    // 2026-11-06 09:30 in Tokyo.
+    let scheduled = html(
+        response(
+            &config,
+            Method::POST,
+            "/g/42/compose",
+            "op=schedule&channel=11&tz=-540&when=2026-11-06T09%3A30&c=hi&b.0.__=1&b.0.label=News&b.0.role=9",
+        )
+        .await,
+    )
+    .await;
+    assert!(scheduled.contains("role=\"status\"") && scheduled.contains("2026-11-06 09:30"));
+    let body = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(body["send_at"], 1_793_925_000);
+    assert_eq!(
+        body["message"]["buttons"],
+        json!([{"label": "News", "role": "9"}])
+    );
+    assert!(body.get("edit").is_none());
+
+    // A link to a message names the message and its channel.
+    let edited = html(
+        response(
+            &config,
+            Method::POST,
+            "/g/42/compose",
+            "op=send&channel=11&edit=https%3A%2F%2Fdiscord.com%2Fchannels%2F42%2F12%2F345&c=new",
+        )
+        .await,
+    )
+    .await;
+    assert!(edited.contains("role=\"status\""));
+    let body = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        (body["edit"].as_str(), body["channel_id"].as_str()),
+        (Some("345"), Some("12"))
+    );
+    assert!(body.get("send_at").is_none());
+
+    for bad in [
+        "op=send&channel=11&edit=nope&c=x",
+        "op=schedule&channel=11&c=x",
+    ] {
+        let page = html(response(&config, Method::POST, "/g/42/compose", bad).await).await;
+        assert!(page.contains("role=\"alert\""), "{bad}");
+    }
+}
+
+#[tokio::test]
 async fn a_setting_that_holds_a_message_is_edited_in_the_composer() {
     let (config, state) = setup().await;
     {
