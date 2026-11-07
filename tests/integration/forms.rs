@@ -201,6 +201,13 @@ async fn rules_are_cards_and_not_text() {
     let add = "etag=%221%22&op=add%3Ar.triggers&new.r.triggers=words&__id=spam&r.name=Spam";
     let page = html(response(&config, Method::POST, &format!("{rules}/new"), add).await).await;
     assert!(page.contains("name=\"r.triggers.0.words\"") && page.contains("value=\"spam\""));
+    // The form shown again carries the revision it was posted with, not the latest.
+    let older = "etag=%220%22&op=add%3Ar.triggers&new.r.triggers=words&__id=spam&r.name=Spam";
+    let page = html(response(&config, Method::POST, &format!("{rules}/new"), older).await).await;
+    assert!(
+        page.contains("name=\"etag\" value=\"&quot;0&quot;\""),
+        "{page}"
+    );
 
     let save = "etag=%221%22&op=save&__id=spam&r.name=Spam&r.triggers.0.__t=words&r.triggers.0.words=bad%0Aworse\
         &r.actions.0.__t=reply&r.actions.0.text=No&r.actions.1.__t=delete&r.enabled=true";

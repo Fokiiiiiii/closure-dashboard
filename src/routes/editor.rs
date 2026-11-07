@@ -127,7 +127,7 @@ pub(super) async fn list(
     };
     if part == "antiraid" {
         return item_page(
-            app, headers, id, module, part, "", &data, &target, None, saved,
+            app, headers, id, module, part, "", &data, &target, None, saved, None,
         );
     }
     let items: Vec<views::Item> = current(&data, module, part)
@@ -289,7 +289,7 @@ pub(super) async fn item(
     }
     let saved = query.get("saved").is_some_and(|v| v == "1");
     item_page(
-        &app, &headers, &id, &module, &part, &key, &data, &target, None, saved,
+        &app, &headers, &id, &module, &part, &key, &data, &target, None, saved, None,
     )
 }
 
@@ -318,6 +318,7 @@ fn item_page(
     target: &Target,
     posted: Option<(Form, Errors, Vec<String>, StatusCode)>,
     saved: bool,
+    kept_etag: Option<&str>,
 ) -> Response {
     let l = lang(headers, app);
     let new = key == "new";
@@ -386,7 +387,8 @@ fn item_page(
         &title,
         &action,
         &back,
-        &data.etag,
+        // The form shown again keeps the revision it was opened on.
+        kept_etag.unwrap_or(&data.etag),
         &format!("{}{}", views::datalist_html(&ctx), inner),
         &banner,
         saved,
@@ -495,6 +497,7 @@ pub(super) async fn save_item(
             &target,
             Some((form_data.state, Errors::new(), Vec::new(), StatusCode::OK)),
             false,
+            Some(&etag),
         );
     }
     let map = current(&data, module, part)
@@ -520,6 +523,7 @@ pub(super) async fn save_item(
                 StatusCode::UNPROCESSABLE_ENTITY,
             )),
             false,
+            Some(&etag),
         );
     }
     let (stored, next) = if single {
