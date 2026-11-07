@@ -539,3 +539,4 @@ col-percent = Percent (100 is as it is)
 mod-giveaway = Giveaways
 mod-tickets = Tickets
 cp-sent-already = This form was sent already, so it was not sent again. Press Send once more to send it as a new message.
+older = Older changes

@@ -231,7 +231,11 @@ api_get_test!(
     effective("42"),
     "/v1/guilds/42/config/effective"
 );
-api_get_test!(api_history, history("42"), "/v1/guilds/42/config/history");
+api_get_test!(
+    api_history,
+    history("42", Some(9)),
+    "/v1/guilds/42/config/history"
+);
 api_get_test!(api_config, config("42"), "/v1/guilds/42/config");
 api_get_test!(api_stats, stats("42", 7), "/v1/guilds/42/stats");
 api_get_test!(api_directory, directory("42"), "/v1/guilds/42/directory");

@@ -22,7 +22,7 @@ pub mod keys {
         TIME_NOW = "time-now", TIME_YESTERDAY = "time-yesterday",
         TIME_MINUTE = "time-minute", TIME_HOUR = "time-hour", TIME_DAY = "time-day",
         NAME = "name", NAVIGATION = "navigation",
-        HISTORY = "history", PERMISSIONS = "permissions", PERIOD = "period",
+        HISTORY = "history", OLDER = "older", PERMISSIONS = "permissions", PERIOD = "period",
         DAYS = "days", SUMMARY = "summary", MEMBERS = "members", JOINS = "joins",
         LEAVES = "leaves", MESSAGES = "messages", MODERATION = "moderation",
         CHARTS = "charts", JOIN_LEAVE = "join-leave",

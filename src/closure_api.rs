@@ -247,10 +247,16 @@ impl Api {
     }
     /// # Errors
     /// Returns a sanitized API or transport error.
-    pub async fn history(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
+    pub async fn history(
+        &self,
+        guild: &str,
+        before: Option<i64>,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        // One more than a page: the revision before the last of it is what its change is read against.
+        let before = before.map_or_else(String::new, |before| format!("&before={before}"));
         self.request(
             Method::GET,
-            &format!("/v1/guilds/{guild}/config/history?limit=50"),
+            &format!("/v1/guilds/{guild}/config/history?limit=51{before}"),
             None,
             None,
             None,

@@ -588,9 +588,14 @@ async fn history_page(
     State(app): State<App>,
     Path(id): Path<String>,
     headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let l = lang(&headers, &app);
-    let (guilds, history) = tokio::join!(app.api.guilds(), app.api.history(&id));
+    // The page older than this revision; a value that is not a number is the first page.
+    let before = query
+        .get("before")
+        .and_then(|before| before.parse::<i64>().ok());
+    let (guilds, history) = tokio::join!(app.api.guilds(), app.api.history(&id, before));
     match (guilds, history) {
         (Ok((g, _)), Ok((h, _))) => {
             Html(views::history(l, &headers, &id, guild_name(&g, &id), &h)).into_response()

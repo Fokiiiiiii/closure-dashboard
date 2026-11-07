@@ -171,6 +171,17 @@ pub(crate) fn history(
     if items.is_empty() {
         let _ = write!(body, "<p class=\"empty\">{}</p>", l.text(keys::NONE));
     }
+    // A page is fifty revisions (the next one's change is read against the fifty-first): when
+    // there are more, the way to the ones older than the last shown.
+    if items.len() > 50 {
+        let oldest = items[49]["revision"].as_u64().unwrap_or(0);
+        let _ = write!(
+            body,
+            "<p><a class=\"button secondary\" href=\"/g/{}/history?before={oldest}\">{}</a></p>",
+            super::escape(id),
+            l.text(keys::OLDER)
+        );
+    }
     body.push_str("</section>");
     shell(l, headers, id, name, keys::HISTORY, &body, false)
 }

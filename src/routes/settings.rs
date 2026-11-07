@@ -105,8 +105,18 @@ pub(super) async fn save(
             return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
         }
     }
-    if roles_present {
-        input.entry("moderator_roles".into()).or_default();
+    if roles_present && !input.contains_key("moderator_roles") {
+        // Every role unticked: when the server has roles now (its own or inherited), that is a
+        // list that is empty on purpose, not a return to what is inherited.
+        let had = data
+            .effective
+            .get("moderator_roles")
+            .and_then(Value::as_array)
+            .is_some_and(|roles| !roles.is_empty());
+        input.insert(
+            "moderator_roles".into(),
+            if had { "-".into() } else { String::new() },
+        );
     }
     let Some(etag) = etag else {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
