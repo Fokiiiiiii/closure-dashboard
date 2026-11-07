@@ -128,8 +128,14 @@ pub(crate) fn history(
         if changes.is_empty() && i + 1 != items.len() {
             continue;
         }
-        let details = if i + 1 == items.len() {
+        // Only the first revision is the initial configuration: the last of a list that was cut
+        // short is one whose predecessor is not in it.
+        let revision = item["revision"].as_u64().unwrap_or(0);
+        let last = i + 1 == items.len();
+        let details = if last && (revision == 1 || revision == 0) {
             l.text(keys::INITIAL)
+        } else if last && changes.is_empty() {
+            "…".to_owned()
         } else {
             let mut result = String::new();
             let mut descriptions = Vec::new();
