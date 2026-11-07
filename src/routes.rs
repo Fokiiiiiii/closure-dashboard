@@ -32,7 +32,14 @@ struct App {
     config: Config,
     api: Api,
     catalogs: std::sync::Arc<Catalogs>,
+    /// The requests being handled at once, so a flood cannot hold every connection to the bot API.
+    busy: std::sync::Arc<tokio::sync::Semaphore>,
 }
+
+/// How many requests the dashboard handles at once; the others are turned away at once.
+const MAX_IN_FLIGHT: usize = 128;
+/// How long one request may take, the call to the bot API included.
+const REQUEST_TIME: Duration = Duration::from_secs(30);
 
 /// Creates the dashboard router.
 ///
@@ -45,6 +52,7 @@ pub fn router(config: Config) -> Router {
         catalogs: std::sync::Arc::new(
             Catalogs::new(REGISTRY).unwrap_or_else(|e| panic!("invalid embedded catalogs: {e}")),
         ),
+        busy: std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)),
     };
     Router::new()
         .route("/", get(index))
@@ -103,6 +111,10 @@ pub fn router(config: Config) -> Router {
         )
         .layer(DefaultBodyLimit::max(262_144))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(262_144))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            StatusCode::GATEWAY_TIMEOUT,
+            REQUEST_TIME,
+        ))
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }
@@ -168,6 +180,17 @@ fn csrf(headers: &HeaderMap, app: &App) -> bool {
         })
 }
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
+    // The health check is not held back by a busy dashboard.
+    let _place = if request.uri().path() == "/healthz" {
+        None
+    } else if let Ok(permit) = std::sync::Arc::clone(&app.busy).try_acquire_owned() {
+        Some(permit)
+    } else {
+        let mut busy = (StatusCode::SERVICE_UNAVAILABLE, "busy").into_response();
+        busy.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+        return busy;
+    };
     let request_headers = request.headers().clone();
     let path = request.uri().path();
     let language = lang(request.headers(), &app);
