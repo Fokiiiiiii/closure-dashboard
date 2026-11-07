@@ -633,9 +633,10 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                     .join(", "),
                 (_, v) => v.to_string(),
             };
+            // Where the shown value comes from: a setting of this server, or what it inherits.
             let inherited = form::lookup(&stored["modules"][module]["config"], &field.name)
                 .is_none_or(Value::is_null)
-                && matches!(field.kind, Kind::Words | Kind::Roles)
+                && !current.is_null()
                 && !fallback.is_empty();
             let value = input.get(&field.name).unwrap_or(&fallback);
             let field_errors = errors.get(&field.name);
@@ -655,11 +656,12 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 field_label(l, field)
             );
             if inherited {
-                let _ = write!(
-                    body,
-                    "<small class=\"muted\">{}</small>",
-                    l.text(keys::INHERITED)
-                );
+                let note = if matches!(field.kind, Kind::Words | Kind::Roles) {
+                    keys::INHERITED_LIST
+                } else {
+                    keys::INHERITED
+                };
+                let _ = write!(body, "<small class=\"muted\">{}</small>", l.text(note));
             }
             if let Some(messages) = field_errors {
                 let _ = write!(

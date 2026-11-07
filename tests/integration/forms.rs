@@ -611,6 +611,14 @@ async fn a_setting_that_holds_a_message_is_edited_in_the_composer() {
 }
 
 #[tokio::test]
+async fn a_value_the_server_never_set_says_it_is_the_default() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().forms = true;
+    let page = html(response(&config, Method::GET, "/g/42/modules/moderation", "").await).await;
+    assert!(page.contains("既定値を使用中です。"), "{page}");
+}
+
+#[tokio::test]
 async fn hidden_dependent_role_is_preserved() {
     let (config, state) = setup().await;
     state.lock().unwrap().forms = true;

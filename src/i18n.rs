@@ -37,7 +37,7 @@ pub mod keys {
         USER_ASSIGNMENTS = "user-assignments", KEY_OVERRIDES = "key-overrides",
         WARN_KIND = "warn-kind", TIMEOUT_KIND = "timeout-kind", KICK_KIND = "kick-kind",
         BAN_KIND = "ban-kind", VCMUTE_KIND = "vcmute-kind",
-        SETTINGS = "settings", NO_SETTINGS = "no-settings", INHERITED = "inherited", SAVE = "save",
+        SETTINGS = "settings", NO_SETTINGS = "no-settings", INHERITED = "inherited", INHERITED_LIST = "inherited-list", SAVE = "save",
         DISCARD = "discard", SAVED = "saved", UNSET = "unset", FIELD_INVALID = "field-invalid",
         RELOAD = "reload", CONFLICT_RELOAD = "conflict-reload",
         SERVER_SETTINGS = "server-settings", UNKNOWN_ROLE = "unknown-role",
