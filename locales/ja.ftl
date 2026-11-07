@@ -517,3 +517,4 @@ col-role = ロール
 col-level = レベル
 col-percent = 倍率（％、100で等倍）
 mod-giveaway = プレゼント企画
+mod-tickets = チケット

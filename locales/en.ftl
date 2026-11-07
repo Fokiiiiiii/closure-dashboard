@@ -535,3 +535,4 @@ col-role = Role
 col-level = Level
 col-percent = Percent (100 is as it is)
 mod-giveaway = Giveaways
+mod-tickets = Tickets
