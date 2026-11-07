@@ -88,6 +88,8 @@ impl Nonces {
 
 /// How many requests the dashboard handles at once; the others are turned away at once.
 const MAX_IN_FLIGHT: usize = 128;
+/// How many servers the first page asks about at once.
+const INDEX_PARALLEL: usize = 8;
 /// How long one request may take, the call to the bot API included.
 const REQUEST_TIME: Duration = Duration::from_secs(30);
 
@@ -495,20 +497,41 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
         Ok(v) => v,
         Err(e) => return api_error(&e, l, &headers),
     };
-    let mut allowed = Vec::new();
-    for guild in guilds.as_array().into_iter().flatten() {
+    // The servers are asked together, a few at a time, not one after the other: a bot in many
+    // servers does not make the first page wait for each of them in turn.
+    let places = std::sync::Arc::new(tokio::sync::Semaphore::new(INDEX_PARALLEL));
+    let mut asking = tokio::task::JoinSet::new();
+    for (order, guild) in guilds.as_array().into_iter().flatten().enumerate() {
         let Some(id) = guild["id"].as_str().filter(|s| session::snowflake(s)) else {
             continue;
         };
-        match app.api.access(id, &actor).await {
-            Ok((access, _)) if access["allowed"] == true => allowed.push((
-                id.to_owned(),
-                guild["name"].as_str().unwrap_or(id).to_owned(),
-            )),
+        let name = guild["name"].as_str().unwrap_or(id).to_owned();
+        let (id, app, actor, places) = (
+            id.to_owned(),
+            app.clone(),
+            actor.clone(),
+            std::sync::Arc::clone(&places),
+        );
+        asking.spawn(async move {
+            let _place = places.acquire_owned().await.ok();
+            let answer = app.api.access(&id, &actor).await;
+            (order, id, name, answer)
+        });
+    }
+    let mut found = Vec::new();
+    while let Some(done) = asking.join_next().await {
+        let Ok((order, id, name, answer)) = done else {
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
+        };
+        match answer {
+            Ok((access, _)) if access["allowed"] == true => found.push((order, id, name)),
             Ok(_) => {}
             Err(e) => return api_error(&e, l, &headers),
         }
     }
+    found.sort_by_key(|(order, _, _)| *order);
+    let allowed: Vec<(String, String)> =
+        found.into_iter().map(|(_, id, name)| (id, name)).collect();
     if allowed.len() == 1 {
         return Redirect::to(&format!("/g/{}", allowed[0].0)).into_response();
     }

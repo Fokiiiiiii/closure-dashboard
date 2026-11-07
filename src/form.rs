@@ -417,6 +417,10 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         }
     } else if ty == "array" && schema["items"]["type"] == "object" {
         Kind::List(columns(&schema["items"])?)
+    } else if ty == "array" && schema["items"]["type"] == "string" {
+        // Ids and texts, told apart by commas: a setting is not dropped from the form for being a
+        // list of strings.
+        Kind::Words
     } else {
         return None;
     };
@@ -546,6 +550,8 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
                 .then(|| json!(ids))
             }
         },
+        // A dash is a list that is empty on purpose, not one that is left to what it inherits.
+        Kind::Words if input.trim() == "-" => Some(json!([])),
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -1136,5 +1142,17 @@ mod tests {
             doc,
             json!({"language":"ja","modules":{"x":{"enabled":true,"config":{"name":null}},"y":{"enabled":false}}})
         );
+    }
+
+    #[test]
+    fn a_list_of_strings_is_a_field_and_a_dash_makes_it_empty_on_purpose() {
+        let schema =
+            json!({ "type": "array", "items": { "type": "string" }, "description": "roles" });
+        let field = field("self_roles", &schema).unwrap();
+        assert_eq!(field.kind, Kind::Words);
+        assert_eq!(parse(&field, "1, 2"), Some(json!(["1", "2"])));
+        assert_eq!(parse(&field, "-"), Some(json!([])));
+        // Left blank it goes back to what it inherits.
+        assert_eq!(parse(&field, ""), Some(Value::Null));
     }
 }
