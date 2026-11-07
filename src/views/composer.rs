@@ -622,6 +622,8 @@ pub(crate) enum Side<'a> {
         when: &'a str,
         /// How many minutes the browser is behind UTC, as it said.
         zone: &'a str,
+        /// The one-time token of this form: a second post with the same token is not sent again.
+        nonce: &'a str,
         waiting: Vec<Waiting>,
     },
     /// A setting that holds a message: the variables it may use, with their examples.
@@ -662,6 +664,7 @@ pub(crate) fn composer_page(
             edit,
             when,
             zone,
+            nonce,
             waiting,
         } => {
             let mut select = format!(
@@ -685,14 +688,15 @@ pub(crate) fn composer_page(
             select.push_str("</select></label>");
             let _ = write!(
                 left,
-                "<section class=\"card cp-section\">{select}<label class=\"cp-input\"><span>{}</span><input type=\"text\" name=\"edit\" value=\"{}\" placeholder=\"https://discord.com/channels/…\" autocomplete=\"off\"><small class=\"cp-hint\">{}</small></label><label class=\"cp-input\"><span>{}</span><input type=\"datetime-local\" name=\"when\" value=\"{}\"><small class=\"cp-hint\">{}</small></label><input type=\"hidden\" name=\"tz\" value=\"{}\"></section>",
+                "<section class=\"card cp-section\">{select}<label class=\"cp-input\"><span>{}</span><input type=\"text\" name=\"edit\" value=\"{}\" placeholder=\"https://discord.com/channels/…\" autocomplete=\"off\"><small class=\"cp-hint\">{}</small></label><label class=\"cp-input\"><span>{}</span><input type=\"datetime-local\" name=\"when\" value=\"{}\"><small class=\"cp-hint\">{}</small></label><input type=\"hidden\" name=\"tz\" value=\"{}\"><input type=\"hidden\" name=\"nonce\" value=\"{}\"></section>",
                 l.text(keys::CP_EDIT_TARGET),
                 escape(edit),
                 l.text(keys::CP_EDIT_HINT),
                 l.text(keys::CP_WHEN),
                 escape(when),
                 l.text(keys::CP_WHEN_HINT),
-                escape(zone)
+                escape(zone),
+                escape(nonce)
             );
             pending = Some((roles, waiting));
         }

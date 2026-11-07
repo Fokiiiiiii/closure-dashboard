@@ -616,6 +616,28 @@ async fn hidden_dependent_role_is_preserved() {
     assert!(config.get("voice_mute_role").is_none());
 }
 
+#[tokio::test]
+async fn a_form_is_sent_once_whatever_the_number_of_posts() {
+    let (config, _state) = setup().await;
+    // A form carries a token and is sent once: the second post of it (a double click) is turned away.
+    let app = router(config.clone());
+    let post = || {
+        request(
+            &config,
+            Method::POST,
+            "/g/42/compose",
+            "op=send&channel=11&c=once&nonce=abc",
+        )
+    };
+    let first = html(app.clone().oneshot(post()).await.unwrap()).await;
+    assert!(first.contains("role=\"status\""));
+    let second = html(app.clone().oneshot(post()).await.unwrap()).await;
+    assert!(
+        second.contains("role=\"alert\"") && second.contains("送信済み"),
+        "{second}"
+    );
+}
+
 async fn response(
     config: &Config,
     method: Method,

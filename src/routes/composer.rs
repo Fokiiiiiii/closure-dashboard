@@ -26,6 +26,8 @@ struct Keep {
     edit: String,
     when: String,
     zone: String,
+    /// The one-time token of the form; empty for a form that is not shown yet.
+    nonce: String,
 }
 
 fn posted(pairs: Vec<(String, String)>) -> Posted {
@@ -42,6 +44,7 @@ fn posted(pairs: Vec<(String, String)>) -> Posted {
             "edit" => out.keep.edit = value,
             "when" => out.keep.when = value,
             "tz" => out.keep.zone = value,
+            "nonce" => out.keep.nonce = value,
             "etag" => out.etag = Some(value),
             _ => {
                 out.form.insert(name, value);
@@ -185,6 +188,11 @@ async fn send_view(
         composer::zone_minutes(&keep.zone),
     )
     .await;
+    let nonce = if keep.nonce.is_empty() {
+        app.nonces.fresh()
+    } else {
+        keep.nonce.clone()
+    };
     let side = views::ComposerSide::Send {
         channels,
         roles: roles(directory.as_ref()),
@@ -192,6 +200,7 @@ async fn send_view(
         edit: &keep.edit,
         when: &keep.when,
         zone: &keep.zone,
+        nonce: &nonce,
         waiting,
     };
     Html(views::composer_page(
@@ -318,6 +327,14 @@ pub(super) async fn send_post(
         let banners = vec![(false, problem)];
         return send_view(&app, &id, &headers, request.form, request.keep, banners).await;
     }
+    // A form is sent once: a second post of it (a double click, a refresh of the answer) finds its
+    // token used and is told so, and sends nothing.
+    if !request.keep.nonce.is_empty() && !app.nonces.take(&request.keep.nonce) {
+        let mut keep = request.keep;
+        keep.nonce.clear();
+        let banners = vec![(false, l.text(keys::CP_SENT_ALREADY))];
+        return send_view(&app, &id, &headers, request.form, keep, banners).await;
+    }
     let edit_id = reference.flatten().map(|(_, message_id)| message_id);
     let send_at = send_at.flatten();
     let post = crate::closure_api::Post {
@@ -332,6 +349,8 @@ pub(super) async fn send_post(
     if send_at.is_some() {
         keep.when.clear();
     }
+    // The form that is shown again is a new one, with a token of its own.
+    keep.nonce.clear();
     send_view(&app, &id, &headers, request.form, keep, vec![banner]).await
 }
 

@@ -34,6 +34,56 @@ struct App {
     catalogs: std::sync::Arc<Catalogs>,
     /// The requests being handled at once, so a flood cannot hold every connection to the bot API.
     busy: std::sync::Arc<tokio::sync::Semaphore>,
+    /// The tokens of the forms that were sent.
+    nonces: std::sync::Arc<Nonces>,
+}
+
+/// One-time tokens for forms: made, and used once. The ones used are remembered up to a bound.
+#[derive(Default)]
+struct Nonces {
+    used: std::sync::Mutex<(
+        std::collections::HashSet<String>,
+        std::collections::VecDeque<String>,
+    )>,
+    made: std::sync::atomic::AtomicU64,
+}
+
+/// How many used tokens are remembered; a token older than that is not told from a new one.
+const NONCES_REMEMBERED: usize = 4096;
+
+impl Nonces {
+    fn fresh(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let count = self.made.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let digest = Sha256::digest(format!("{nanos}:{count}"));
+        digest.iter().take(12).fold(String::new(), |mut out, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+    }
+
+    /// Uses the token: `true` the first time, `false` after.
+    fn take(&self, nonce: &str) -> bool {
+        let mut used = self
+            .used
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (set, order) = &mut *used;
+        if !set.insert(nonce.to_owned()) {
+            return false;
+        }
+        order.push_back(nonce.to_owned());
+        while order.len() > NONCES_REMEMBERED {
+            if let Some(old) = order.pop_front() {
+                set.remove(&old);
+            }
+        }
+        true
+    }
 }
 
 /// How many requests the dashboard handles at once; the others are turned away at once.
@@ -53,6 +103,7 @@ pub fn router(config: Config) -> Router {
             Catalogs::new(REGISTRY).unwrap_or_else(|e| panic!("invalid embedded catalogs: {e}")),
         ),
         busy: std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)),
+        nonces: std::sync::Arc::new(Nonces::default()),
     };
     Router::new()
         .route("/", get(index))

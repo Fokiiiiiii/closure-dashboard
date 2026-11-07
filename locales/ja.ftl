@@ -518,3 +518,4 @@ col-level = レベル
 col-percent = 倍率（％、100で等倍）
 mod-giveaway = プレゼント企画
 mod-tickets = チケット
+cp-sent-already = このフォームはすでに送信済みのため、もう一度は送りませんでした。新しいメッセージとして送るには、もう一度送信を押してください。
