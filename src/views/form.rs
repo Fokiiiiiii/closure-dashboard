@@ -624,6 +624,8 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
             let fallback = match (&field.kind, current) {
                 (_, Value::String(s)) => s.clone(),
                 (_, Value::Null) => String::new(),
+                // An empty list that was set on purpose is shown as the dash that makes it.
+                (Kind::Words | Kind::Roles, Value::Array(a)) if a.is_empty() => "-".into(),
                 (_, Value::Array(a)) if a.iter().all(Value::is_string) => a
                     .iter()
                     .filter_map(Value::as_str)
@@ -631,6 +633,10 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                     .join(", "),
                 (_, v) => v.to_string(),
             };
+            let inherited = form::lookup(&stored["modules"][module]["config"], &field.name)
+                .is_none_or(Value::is_null)
+                && matches!(field.kind, Kind::Words | Kind::Roles)
+                && !fallback.is_empty();
             let value = input.get(&field.name).unwrap_or(&fallback);
             let field_errors = errors.get(&field.name);
             let when = form::dependency(module, &field.name)
@@ -648,6 +654,13 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 escape(field.schema["description"].as_str().unwrap_or(&field.label)),
                 field_label(l, field)
             );
+            if inherited {
+                let _ = write!(
+                    body,
+                    "<small class=\"muted\">{}</small>",
+                    l.text(keys::INHERITED)
+                );
+            }
             if let Some(messages) = field_errors {
                 let _ = write!(
                     body,

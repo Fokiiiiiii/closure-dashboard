@@ -627,7 +627,11 @@ pub(crate) enum Side<'a> {
         waiting: Vec<Waiting>,
     },
     /// A setting that holds a message: the variables it may use, with their examples.
-    Setting { variables: &'a [String] },
+    Setting {
+        variables: &'a [String],
+        /// The revision of the settings the form was opened on, posted back with it.
+        etag: &'a str,
+    },
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -700,7 +704,12 @@ pub(crate) fn composer_page(
             );
             pending = Some((roles, waiting));
         }
-        Side::Setting { variables } => {
+        Side::Setting { variables, etag } => {
+            let _ = write!(
+                left,
+                "<input type=\"hidden\" name=\"etag\" value=\"{}\">",
+                escape(etag)
+            );
             let mut chips = String::new();
             for name in *variables {
                 let _ = write!(

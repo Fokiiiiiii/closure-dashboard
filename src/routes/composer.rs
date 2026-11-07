@@ -370,7 +370,7 @@ async fn setting_view(
     id: &str,
     (module, field): (&str, &str),
     posted: Option<(Form, Vec<(bool, String)>)>,
-    saved: bool,
+    (saved, kept_etag): (bool, Option<&str>),
 ) -> Response {
     let l = lang(headers, app);
     let data = match load(app, id, l.bot_language()).await {
@@ -397,8 +397,11 @@ async fn setting_view(
         .find(&format!("ed-f-{}", field.replace('.', "_")))
         .unwrap_or_else(|| escape(field));
     let title = format!("{} › {label}", views::part_name(l, module, part));
+    // The form that was posted keeps the revision it was opened on, so a save after a failed
+    // check or an added embed still stops at what was changed in between.
     let side = views::ComposerSide::Setting {
         variables: &variables,
+        etag: kept_etag.unwrap_or(&data.etag),
     };
     let page = views::composer_page(
         l,
@@ -423,7 +426,7 @@ pub(super) async fn setting_page(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let saved = query.get("saved").is_some_and(|v| v == "1");
-    setting_view(&app, &headers, &id, (&module, &field), None, saved).await
+    setting_view(&app, &headers, &id, (&module, &field), None, (saved, None)).await
 }
 
 pub(super) async fn setting_post(
@@ -444,7 +447,8 @@ pub(super) async fn setting_post(
     }
     if edit(&mut request.form, &request.op) {
         let shown = Some((request.form, Vec::new()));
-        return setting_view(&app, &headers, &id, (&module, &field), shown, false).await;
+        let kept = request.etag.as_deref();
+        return setting_view(&app, &headers, &id, (&module, &field), shown, (false, kept)).await;
     }
     if request.op != "save" {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
@@ -464,7 +468,9 @@ pub(super) async fn setting_post(
     if form::update(&mut data.stored, &module, &changes).is_err() {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
     }
-    let etag = request.etag.unwrap_or_else(|| data.etag.clone());
+    let Some(etag) = request.etag.clone() else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    };
     match app
         .api
         .put_basic_config(&id, data.stored.clone(), &etag, &actor)
@@ -479,7 +485,8 @@ pub(super) async fn setting_post(
             let mut banners = vec![(false, escape(&e.message))];
             banners.extend(e.issues.into_iter().map(|i| (false, escape(&i.message))));
             let shown = Some((request.form, banners));
-            setting_view(&app, &headers, &id, (&module, &field), shown, false).await
+            let kept = Some(etag.as_str());
+            setting_view(&app, &headers, &id, (&module, &field), shown, (false, kept)).await
         }
         Err(e) => api_error(&e, l, &headers),
     }

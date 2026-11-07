@@ -551,7 +551,7 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             }
         },
         // A dash is a list that is empty on purpose, not one that is left to what it inherits.
-        Kind::Words if input.trim() == "-" => Some(json!([])),
+        Kind::Words | Kind::Roles if input.trim() == "-" => Some(json!([])),
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -1154,5 +1154,20 @@ mod tests {
         assert_eq!(parse(&field, "-"), Some(json!([])));
         // Left blank it goes back to what it inherits.
         assert_eq!(parse(&field, ""), Some(Value::Null));
+    }
+
+    #[test]
+    fn a_dash_in_a_list_of_roles_is_no_roles_and_blank_is_the_inherited_ones() {
+        let field = Field {
+            kind: Kind::Roles,
+            ..field(
+                "self_roles",
+                &json!({ "type": "array", "items": { "type": "string" } }),
+            )
+            .unwrap()
+        };
+        assert_eq!(parse(&field, "-"), Some(json!([])));
+        assert_eq!(parse(&field, ""), Some(Value::Null));
+        assert_eq!(parse(&field, "+5, 6"), Some(json!(["+5", "6"])));
     }
 }

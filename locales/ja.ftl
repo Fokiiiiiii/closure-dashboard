@@ -16,6 +16,7 @@ settings-moderator-roles = モデレーターロール
 lang-auto = 自動
 lang-ja = 日本語
 lang-en = English
+inherited = 既定値を使用中です。意図的に空にするには「-」と入力します。
 no-settings = このモジュールに設定項目はありません
 save = 保存
 discard = 破棄

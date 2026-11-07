@@ -16,6 +16,7 @@ settings-moderator-roles = Moderator roles
 lang-auto = Automatic
 lang-ja = Japanese
 lang-en = English
+inherited = Using the default. Enter "-" to make it empty on purpose.
 no-settings = This module has no settings
 save = Save
 discard = Discard

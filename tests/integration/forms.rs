@@ -552,6 +552,18 @@ async fn a_setting_that_holds_a_message_is_edited_in_the_composer() {
             && page.contains("<code>{server}</code>")
     );
     assert!(!page.contains("name=\"channel\""));
+    // The form carries the revision it was opened on, and a post without it is not saved.
+    assert!(
+        page.contains("name=\"etag\" value=\"&quot;1&quot;\"")
+            || page.contains("name=\"etag\" value=\"\"1\"\""),
+        "{page}"
+    );
+    assert_eq!(
+        response(&config, Method::POST, path, "op=save&c=Hi")
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
     let fragment = html(
         response(
             &config,
