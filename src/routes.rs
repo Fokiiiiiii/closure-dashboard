@@ -36,6 +36,48 @@ struct App {
     busy: std::sync::Arc<tokio::sync::Semaphore>,
     /// The tokens of the forms that were sent.
     nonces: std::sync::Arc<Nonces>,
+    /// What the first page listed for each person lately.
+    listings: std::sync::Arc<Listings>,
+}
+
+/// The servers the first page listed for each person, kept for a short time: a reload, and a
+/// person who shares no server with the bot, do not make the bot answer for every one of its
+/// servers again. The pages of a server check access on their own, so a stale entry only shows
+/// or hides a link for a minute.
+#[derive(Default)]
+struct Listings(std::sync::Mutex<std::collections::HashMap<String, Listing>>);
+
+/// When a listing was made, and the (id, name) of each server in it.
+type Listing = (std::time::Instant, Vec<(String, String)>);
+
+/// How long a listing is kept.
+const LISTING_AGE: Duration = Duration::from_secs(60);
+/// How many people have a listing kept at once.
+const LISTING_PEOPLE: usize = 10_000;
+
+impl Listings {
+    fn get(&self, actor: &str) -> Option<Vec<(String, String)>> {
+        let kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (at, list) = kept.get(actor)?;
+        (at.elapsed() < LISTING_AGE).then(|| list.clone())
+    }
+
+    fn put(&self, actor: &str, list: Vec<(String, String)>) {
+        let mut kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if kept.len() >= LISTING_PEOPLE {
+            kept.retain(|_, (at, _)| at.elapsed() < LISTING_AGE);
+        }
+        if kept.len() >= LISTING_PEOPLE {
+            kept.clear();
+        }
+        kept.insert(actor.to_owned(), (std::time::Instant::now(), list));
+    }
 }
 
 /// One-time tokens for forms: made, and used once. The ones used are remembered up to a bound.
@@ -106,6 +148,7 @@ pub fn router(config: Config) -> Router {
         ),
         busy: std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)),
         nonces: std::sync::Arc::new(Nonces::default()),
+        listings: std::sync::Arc::new(Listings::default()),
     };
     Router::new()
         .route("/", get(index))
@@ -493,6 +536,9 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
     };
+    if let Some(allowed) = app.listings.get(&actor) {
+        return servers_page(l, &headers, &allowed);
+    }
     let (guilds, _) = match app.api.guilds().await {
         Ok(v) => v,
         Err(e) => return api_error(&e, l, &headers),
@@ -532,10 +578,14 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
     found.sort_by_key(|(order, _, _)| *order);
     let allowed: Vec<(String, String)> =
         found.into_iter().map(|(_, id, name)| (id, name)).collect();
-    if allowed.len() == 1 {
-        return Redirect::to(&format!("/g/{}", allowed[0].0)).into_response();
+    app.listings.put(&actor, allowed.clone());
+    servers_page(l, &headers, &allowed)
+}
+fn servers_page(l: Locale<'_>, headers: &HeaderMap, allowed: &[(String, String)]) -> Response {
+    if let [(id, _)] = allowed {
+        return Redirect::to(&format!("/g/{id}")).into_response();
     }
-    Html(views::servers(l, &headers, &allowed)).into_response()
+    Html(views::servers(l, headers, allowed)).into_response()
 }
 fn module_names(schema: &Value) -> serde_json::Map<String, Value> {
     let modules = &schema["properties"]["modules"];

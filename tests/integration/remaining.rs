@@ -167,3 +167,27 @@ async fn index_redirects_one_and_displays_empty() {
         .contains("利用できるサーバーはありません")
     );
 }
+
+#[tokio::test]
+async fn a_reload_of_the_first_page_does_not_ask_about_every_server_again() {
+    let (config, state) = setup().await;
+    let app = router(config.clone());
+    for _ in 0..3 {
+        let response = app
+            .clone()
+            .oneshot(request(&config, Method::GET, "/", ""))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    }
+    assert_eq!(
+        state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .filter(|call| call.0.ends_with("/access/123"))
+            .count(),
+        1
+    );
+}
