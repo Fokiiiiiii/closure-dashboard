@@ -20,6 +20,9 @@ pub struct Post<'a> {
     pub edit: Option<&'a str>,
     /// Unix seconds; `None` sends now.
     pub send_at: Option<i64>,
+    /// The token of the form: the same form is sent once, even when it is posted again after a
+    /// restart of the dashboard.
+    pub key: Option<&'a str>,
 }
 
 #[derive(Clone)]
@@ -108,6 +111,23 @@ impl Api {
         etag: Option<&str>,
         actor: Option<&str>,
     ) -> Result<(Value, Option<String>), ApiError> {
+        self.request_keyed(method, path, body, etag, actor, None)
+            .await
+    }
+    /// [`Self::request`] with an `Idempotency-Key`: the bot does what the request asks once, whatever
+    /// the number of times it comes.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    async fn request_keyed(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        etag: Option<&str>,
+        actor: Option<&str>,
+        key: Option<&str>,
+    ) -> Result<(Value, Option<String>), ApiError> {
         let mut builder = Request::builder()
             .method(method)
             .uri(format!("{}{path}", self.base))
@@ -118,6 +138,9 @@ impl Api {
         }
         if let Some(a) = actor {
             builder = builder.header("x-closure-actor", a);
+        }
+        if let Some(key) = key {
+            builder = builder.header("idempotency-key", key);
         }
         let request_body = if let Some(data) = body {
             builder = builder.header("content-type", "application/json");
@@ -346,12 +369,13 @@ impl Api {
         if let Some(at) = post.send_at {
             body["send_at"] = serde_json::json!(at);
         }
-        self.request(
+        self.request_keyed(
             Method::POST,
             &format!("/v1/guilds/{guild}/messages"),
             Some(body),
             None,
             Some(actor),
+            post.key,
         )
         .await
     }

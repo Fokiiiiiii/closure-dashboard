@@ -61,6 +61,7 @@ struct Fake {
     stats_status: Option<StatusCode>,
     assigned: bool,
     queries: Vec<String>,
+    keys: Vec<String>,
     forms: bool,
     directory_failure: bool,
     form_put_status: Option<StatusCode>,
@@ -90,8 +91,14 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         .and_then(|x| x.to_str().ok())
         .unwrap_or("")
         .to_owned();
+    let key = request
+        .headers()
+        .get("idempotency-key")
+        .and_then(|x| x.to_str().ok())
+        .map(str::to_owned);
     let body = to_bytes(request.into_body(), 65536).await.unwrap();
     let mut fake = state.lock().unwrap();
+    fake.keys.extend(key);
     fake.queries.push(format!("{path}?{query}"));
     fake.calls.push((path.clone(), auth, etag, actor));
     if let Some(status) = fake.status {

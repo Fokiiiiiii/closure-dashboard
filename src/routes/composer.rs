@@ -342,6 +342,14 @@ pub(super) async fn send_post(
         message: &message,
         edit: edit_id.as_deref(),
         send_at,
+        // The bot sends a form once, even when the dashboard restarts between the send and the
+        // answer and the form is posted again.
+        key: Some(request.keep.nonce.as_str()).filter(|nonce| {
+            (1..=64).contains(&nonce.len())
+                && nonce
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        }),
     };
     let result = app.api.send_message(&id, &post, &actor).await;
     let banner = sent_banner(l, result, (edit_id.is_some(), send_at, zone));

@@ -645,7 +645,7 @@ async fn hidden_dependent_role_is_preserved() {
 
 #[tokio::test]
 async fn a_form_is_sent_once_whatever_the_number_of_posts() {
-    let (config, _state) = setup().await;
+    let (config, state) = setup().await;
     // A form carries a token and is sent once: the second post of it (a double click) is turned away.
     let app = router(config.clone());
     let post = || {
@@ -663,6 +663,9 @@ async fn a_form_is_sent_once_whatever_the_number_of_posts() {
         second.contains("role=\"alert\"") && second.contains("送信済み"),
         "{second}"
     );
+    // The token also goes to the bot as the key of the send, so that a post after a restart of the
+    // dashboard is not sent twice either.
+    assert_eq!(state.lock().unwrap().keys, ["abc"]);
 }
 
 async fn response(
