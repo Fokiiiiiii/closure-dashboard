@@ -180,9 +180,7 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         );
     } else if path.ends_with("/cases") && method == Method::GET {
         json!({"cases":[json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})],"next_before":7})
-    } else if path.ends_with("/cases") {
-        json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})
-    } else if path.contains("/cases/") {
+    } else if path.ends_with("/cases") || path.contains("/cases/") {
         json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})
     } else if path.ends_with("/stats") {
         json!({"members":{"total":1284,"joins":5,"leaves":2,"by_day":[{"date":"2026-11-03","joins":null,"leaves":null},{"date":"2026-11-04","joins":5,"leaves":2}]},"messages":{"retention_days":7,"total":123,"by_day":[{"date":"2026-11-03","count":null},{"date":"2026-11-04","count":123}]},"cases":{"total":3,"by_day":[{"date":"2026-11-04","kinds":{"warn":2,"<script>":1}}],"recent":[{"number":12,"kind":"<script>","target":"<script>","moderator":"<script>","reason":"<script>","created_at_unix":1793790842,"revoked":true}]}})
