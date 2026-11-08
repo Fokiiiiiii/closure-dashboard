@@ -7,10 +7,9 @@ use closure_dashboard::{config::Config, router};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
-    axum::serve(listener, router(config))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    closure_dashboard::serve::serve(listener, router(config), async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await;
     Ok(())
 }

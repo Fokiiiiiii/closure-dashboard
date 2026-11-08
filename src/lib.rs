@@ -9,6 +9,7 @@ pub mod form;
 pub mod html;
 pub mod i18n;
 pub mod routes;
+pub mod serve;
 pub mod session;
 pub mod templates;
 mod views;
