@@ -100,7 +100,6 @@ pub struct Definition {
     pub source: &'static str,
 }
 
-/// Groups digits by thousands.
 // shortcut: a comma for every locale (ja and en agree); when a locale needs another separator, move it into `Definition`.
 #[must_use]
 pub fn group_digits(n: u64) -> String {
@@ -136,7 +135,6 @@ pub struct Catalogs {
 }
 
 impl Catalogs {
-    /// Constructs and validates the registered catalogs.
     ///
     /// # Errors
     /// Returns an error if a tag or Fluent source is invalid, or if a message is duplicated.

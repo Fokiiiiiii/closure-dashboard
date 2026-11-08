@@ -422,7 +422,6 @@ mod tests {
 
     #[test]
     fn a_local_time_goes_to_unix_seconds_and_back() {
-        // 2026-11-06 09:30 in Tokyo (540 minutes ahead of UTC) is 00:30 UTC.
         let unix = parse_local("2026-11-06T09:30", -540).unwrap();
         assert_eq!(unix, 1_793_925_000);
         assert_eq!(show_local(unix, -540), "2026-11-06 09:30");

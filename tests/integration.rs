@@ -718,7 +718,6 @@ async fn login_goes_straight_to_discord_unless_the_dev_login_is_on() {
     };
     let response = router(config.clone()).oneshot(anonymous()).await.unwrap();
     if cfg!(debug_assertions) {
-        // A development build with a configured user signs in at once, with no page in between.
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(response.headers()[header::LOCATION], "/");
         assert!(

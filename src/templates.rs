@@ -1,9 +1,7 @@
 //! Rules the dashboard offers ready-made on the rules page of automod.
 //!
-//! A template is a whole rule in the shape the bot reads. Adding one stores it as it is, under a
-//! free id; nothing here is a second source of truth, because the rule is the user's from then on.
-//! The same rules are checked against the bot's schema in `closure-mod-automod`
-//! (`tests/templates.rs`), so a template cannot drift into one the bot refuses.
+//! A template is a whole rule in the shape the bot reads; adding one stores a copy under a free id.
+//! The bot's own tests check these rules against its schema, so a template cannot drift into one it refuses.
 
 use serde_json::{Value, json};
 

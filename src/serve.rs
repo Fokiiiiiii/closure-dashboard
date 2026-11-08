@@ -1,10 +1,7 @@
 //! The server the dashboard runs on: what is limited before a request is even read.
 //!
-//! `axum::serve` takes every connection and waits as long as a client likes for the headers of a
-//! request, so a few hundred idle or trickling connections could hold the dashboard for good (the
-//! limits on a request apply only once its headers are in). Here the number of connections is
-//! capped, one over the cap is closed at once, and a client that does not finish its headers in
-//! time is cut off.
+//! `axum::serve` waits as long as a client likes for request headers, so idle connections could hold it.
+//! Here connections are capped, an extra one is closed at once, and a slow header is cut off by a timeout.
 
 use std::future::Future;
 use std::sync::Arc;

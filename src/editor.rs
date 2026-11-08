@@ -1,11 +1,6 @@
-//! A schema-driven editor for the structured settings: the rules, the counters and the anti-raid of
-//! the automod module. The schema says what a setting holds; the editor turns it into a tree of
-//! fields, keeps the form as flat inputs (`State`), and reads the inputs back into a value.
-//!
-//! The inputs are named by their path: `r.triggers.0.words` is the `words` of the first trigger.
-//! A list of variants keeps its rows as `<path>.<n>.__t` (the variant), a set of entries as
-//! `<path>.<n>.__k` (the name); `<row>.__x` marks a row removed, and `<object>.__on` says that an
-//! optional object is there.
+//! A schema-driven editor for the structured settings: rules, counters and anti-raid.
+//! Inputs are named by path, e.g. `r.triggers.0.words`; `<row>.__x` marks a removed row.
+//! A row is `<path>.<n>.__t` (variant) or `<path>.<n>.__k` (entry name); `<object>.__on` marks a present optional object.
 
 use crate::form::pattern_matches;
 use serde_json::{Map, Value, json};

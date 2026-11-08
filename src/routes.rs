@@ -35,25 +35,20 @@ struct App {
     catalogs: std::sync::Arc<Catalogs>,
     /// The requests being handled at once, so a flood cannot hold every connection to the bot API.
     busy: std::sync::Arc<tokio::sync::Semaphore>,
-    /// The tokens of the forms that were sent.
     nonces: std::sync::Arc<Nonces>,
     /// What the first page listed for each person lately.
     listings: std::sync::Arc<Listings>,
 }
 
-/// The servers the first page listed for each person, kept for a short time: a reload, and a
-/// person who shares no server with the bot, do not make the bot answer for every one of its
-/// servers again. The pages of a server check access on their own, so a stale entry only shows
-/// or hides a link for a minute.
+/// Servers the first page listed per person, kept briefly so a reload does not ask the bot again.
+/// Each server page checks access itself, so a stale entry only shows or hides a link for a minute.
 #[derive(Default)]
 struct Listings(std::sync::Mutex<std::collections::HashMap<String, Listing>>);
 
 /// When a listing was made, and the (id, name) of each server in it.
 type Listing = (std::time::Instant, Vec<(String, String)>);
 
-/// How long a listing is kept.
 const LISTING_AGE: Duration = Duration::from_secs(60);
-/// How many people have a listing kept at once.
 const LISTING_PEOPLE: usize = 10_000;
 
 impl Listings {
@@ -131,12 +126,10 @@ impl Nonces {
 
 /// How many requests the dashboard handles at once; the others are turned away at once.
 const MAX_IN_FLIGHT: usize = 128;
-/// How many servers the first page asks about at once.
 const INDEX_PARALLEL: usize = 8;
 /// How long one request may take, the call to the bot API included.
 const REQUEST_TIME: Duration = Duration::from_secs(30);
 
-/// Creates the dashboard router.
 ///
 /// # Panics
 /// Panics if the embedded locale registry is invalid.

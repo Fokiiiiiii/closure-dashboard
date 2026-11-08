@@ -493,7 +493,6 @@ async fn a_post_can_carry_role_buttons_replace_a_message_and_wait_for_its_time()
     .await;
     assert!(fragment.contains("dc-button") && fragment.contains("&lt;b&gt;News"));
 
-    // 2026-11-06 09:30 in Tokyo.
     let scheduled = html(
         response(
             &config,
@@ -646,7 +645,6 @@ async fn hidden_dependent_role_is_preserved() {
 #[tokio::test]
 async fn a_form_is_sent_once_whatever_the_number_of_posts() {
     let (config, state) = setup().await;
-    // A form carries a token and is sent once: the second post of it (a double click) is turned away.
     let app = router(config.clone());
     let post = || {
         request(

@@ -20,8 +20,7 @@ pub struct Post<'a> {
     pub edit: Option<&'a str>,
     /// Unix seconds; `None` sends now.
     pub send_at: Option<i64>,
-    /// The token of the form: the same form is sent once, even when it is posted again after a
-    /// restart of the dashboard.
+    /// Form token: the bot sends the form once, even across a dashboard restart.
     pub key: Option<&'a str>,
 }
 
@@ -142,8 +141,7 @@ impl Api {
         .await
         .map_err(|_| ApiError::unavailable())?
     }
-    /// [`Self::request`] with an `Idempotency-Key`: the bot does what the request asks once, whatever
-    /// the number of times it comes.
+    /// [`Self::request`] with an `Idempotency-Key`: the bot acts once, however often it arrives.
     ///
     /// # Errors
     /// Returns a sanitized API or transport error.
@@ -304,8 +302,7 @@ impl Api {
         )
         .await
     }
-    /// The cases of a server a person may see, as the bot lists them. `query` is the encoded
-    /// filter (`kind=ban&before=40`).
+    /// The cases a person may see. `query` is the encoded filter (`kind=ban&before=40`).
     ///
     /// # Errors
     /// Returns a sanitized API or transport error.
@@ -324,8 +321,6 @@ impl Api {
         )
         .await
     }
-    /// One case.
-    ///
     /// # Errors
     /// Returns a sanitized API or transport error.
     pub async fn case(
