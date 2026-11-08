@@ -62,6 +62,7 @@ struct Fake {
     assigned: bool,
     queries: Vec<String>,
     keys: Vec<String>,
+    bodies: Vec<(String, String)>,
     forms: bool,
     directory_failure: bool,
     form_put_status: Option<StatusCode>,
@@ -99,6 +100,10 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     let body = to_bytes(request.into_body(), 65536).await.unwrap();
     let mut fake = state.lock().unwrap();
     fake.keys.extend(key);
+    if path.contains("/cases") {
+        fake.bodies
+            .push((path.clone(), String::from_utf8_lossy(&body).into_owned()));
+    }
     fake.queries.push(format!("{path}?{query}"));
     fake.calls.push((path.clone(), auth, etag, actor));
     if let Some(status) = fake.status {
@@ -165,6 +170,20 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         }
     } else if path.ends_with("/directory") {
         json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path.ends_with("/cases/summary") {
+        json!({"since":0,"total":3,"by_kind":{"ban":2,"warn":1},"by_source":{"command":3},"by_state":{"active":2,"expired":0,"revoked":1},"daily":[],"moderators":[{"id":"123","count":3}],"targets":[{"id":"555","count":2}],"days":30})
+    } else if path.ends_with("/cases/export") {
+        return (
+            StatusCode::OK,
+            [(header::ETAG, "\"1\"")],
+            "number,created_at\n7,1793790842\n".to_owned(),
+        );
+    } else if path.ends_with("/cases") && method == Method::GET {
+        json!({"cases":[json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})],"next_before":7})
+    } else if path.ends_with("/cases") {
+        json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})
+    } else if path.contains("/cases/") {
+        json!({"number":7,"module":"moderation","kind":"ban","target":"555","moderator":"123","reason":"<b>spam</b>","created_at":1793790842,"expires_at":null,"state":"active","revoked":null,"source":"command","hidden":false})
     } else if path.ends_with("/stats") {
         json!({"members":{"total":1284,"joins":5,"leaves":2,"by_day":[{"date":"2026-11-03","joins":null,"leaves":null},{"date":"2026-11-04","joins":5,"leaves":2}]},"messages":{"retention_days":7,"total":123,"by_day":[{"date":"2026-11-03","count":null},{"date":"2026-11-04","count":123}]},"cases":{"total":3,"by_day":[{"date":"2026-11-04","kinds":{"warn":2,"<script>":1}}],"recent":[{"number":12,"kind":"<script>","target":"<script>","moderator":"<script>","reason":"<script>","created_at_unix":1793790842,"revoked":true}]}})
     } else if path.ends_with("/history") {

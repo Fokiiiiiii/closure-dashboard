@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod cases;
 mod composer;
 mod editor;
 mod modules;
@@ -158,6 +159,13 @@ pub fn router(config: Config) -> Router {
         .route("/logout", post(logout))
         .route("/g/{id}", get(guild))
         .route("/g/{id}/history", get(history_page))
+        .route("/g/{id}/cases", get(cases::list))
+        .route("/g/{id}/cases/export", get(cases::export))
+        .route("/g/{id}/cases/note", post(cases::add_note))
+        .route(
+            "/g/{id}/cases/{number}",
+            get(cases::one).post(cases::change),
+        )
         .route("/g/{id}/permissions", get(permissions_page))
         .route("/g/{id}/modules", get(modules::list))
         .route("/g/{id}/settings", get(settings::edit).post(settings::save))

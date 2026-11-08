@@ -1,6 +1,6 @@
 use crate::config::Config;
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     http::{Method, Request, StatusCode},
 };
 use http_body_util::BodyExt;
@@ -114,6 +114,34 @@ impl Api {
         self.request_keyed(method, path, body, etag, actor, None)
             .await
     }
+    /// Sends a request and reads the whole answer, within ten seconds.
+    async fn transport(
+        &self,
+        request: Request<Body>,
+    ) -> Result<(StatusCode, Option<String>, Bytes), ApiError> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let response = self
+                .client
+                .request(request)
+                .await
+                .map_err(|_| ApiError::unavailable())?;
+            let status = response.status();
+            let etag = response
+                .headers()
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.replace(&self.token, "[redacted]"));
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .map_err(|_| ApiError::unavailable())?
+                .to_bytes();
+            Ok::<_, ApiError>((status, etag, bytes))
+        })
+        .await
+        .map_err(|_| ApiError::unavailable())?
+    }
     /// [`Self::request`] with an `Idempotency-Key`: the bot does what the request asks once, whatever
     /// the number of times it comes.
     ///
@@ -151,29 +179,7 @@ impl Api {
         let request = builder
             .body(request_body)
             .map_err(|_| ApiError::unavailable())?;
-        let response = tokio::time::timeout(Duration::from_secs(10), async {
-            let response = self
-                .client
-                .request(request)
-                .await
-                .map_err(|_| ApiError::unavailable())?;
-            let status = response.status();
-            let etag = response
-                .headers()
-                .get("etag")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.replace(&self.token, "[redacted]"));
-            let bytes = response
-                .into_body()
-                .collect()
-                .await
-                .map_err(|_| ApiError::unavailable())?
-                .to_bytes();
-            Ok::<_, ApiError>((status, etag, bytes))
-        })
-        .await
-        .map_err(|_| ApiError::unavailable())??;
-        let (status, etag, bytes) = response;
+        let (status, etag, bytes) = self.transport(request).await?;
         let mut data: Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
             Err(_) if !status.is_success() => {
@@ -297,6 +303,131 @@ impl Api {
             None,
         )
         .await
+    }
+    /// The cases of a server a person may see, as the bot lists them. `query` is the encoded
+    /// filter (`kind=ban&before=40`).
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn cases(
+        &self,
+        guild: &str,
+        query: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/cases?{query}"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// One case.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn case(
+        &self,
+        guild: &str,
+        number: i64,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/cases/{number}"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// The counts of the cases of the last `days` days.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn cases_summary(
+        &self,
+        guild: &str,
+        days: u16,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/cases/summary?days={days}"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// Records a note against a member in the name of `actor`.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn add_note(
+        &self,
+        guild: &str,
+        target: &str,
+        reason: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::POST,
+            &format!("/v1/guilds/{guild}/cases"),
+            Some(serde_json::json!({ "target": target, "reason": reason })),
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// Changes the reason of a case, or hides or shows it.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn change_case(
+        &self,
+        guild: &str,
+        number: i64,
+        change: Value,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::PATCH,
+            &format!("/v1/guilds/{guild}/cases/{number}"),
+            Some(change),
+            None,
+            Some(actor),
+        )
+        .await
+    }
+    /// The CSV of the cases a filter finds.
+    ///
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn cases_csv(
+        &self,
+        guild: &str,
+        query: &str,
+        actor: &str,
+    ) -> Result<Bytes, ApiError> {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!(
+                "{}/v1/guilds/{guild}/cases/export?{query}",
+                self.base
+            ))
+            .header("authorization", format!("Bearer {}", self.token))
+            .header("x-closure-actor", actor)
+            .body(Body::empty())
+            .map_err(|_| ApiError::unavailable())?;
+        let (status, _, bytes) = self.transport(request).await?;
+        if status.is_success() {
+            Ok(bytes)
+        } else {
+            Err(ApiError::new(status, String::new(), vec![]))
+        }
     }
     /// # Errors
     /// Returns a sanitized API or transport error.

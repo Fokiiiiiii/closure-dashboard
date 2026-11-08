@@ -73,6 +73,7 @@ pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, Str
     page(l, headers, &body)
 }
 
+mod cases;
 mod charts;
 mod composer;
 mod editor;
@@ -94,6 +95,7 @@ fn page_icon(key: &str) -> &'static str {
         }
         keys::HISTORY => "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
         keys::PERMISSIONS => "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
+        keys::CASES => "M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5",
         _ => "",
     }
 }
@@ -159,6 +161,10 @@ fn first_sentence(description: &str) -> String {
     }
 }
 
+pub(crate) use cases::{
+    CasesPage, Filter as CaseFilter, SOURCES as CASE_SOURCES, STATES as CASE_STATES,
+    case as case_page, cases as cases_page,
+};
 pub(crate) use composer::{
     Side as ComposerSide, Waiting as ComposerWaiting, composer_page, preview as composer_preview,
 };
@@ -188,6 +194,7 @@ pub(crate) fn shell(
         ("/modules", keys::MODULES),
         ("/compose", keys::COMPOSE),
         ("/settings", keys::SERVER_SETTINGS),
+        ("/cases", keys::CASES),
         ("/history", keys::HISTORY),
         ("/permissions", keys::PERMISSIONS),
     ] {
