@@ -46,13 +46,13 @@ struct App {
 struct Listings(std::sync::Mutex<std::collections::HashMap<String, Listing>>);
 
 /// When a listing was made, and the (id, name) of each server in it.
-type Listing = (std::time::Instant, Vec<(String, String)>);
+type Listing = (std::time::Instant, Vec<(String, String, bool)>);
 
 const LISTING_AGE: Duration = Duration::from_secs(60);
 const LISTING_PEOPLE: usize = 10_000;
 
 impl Listings {
-    fn get(&self, actor: &str) -> Option<Vec<(String, String)>> {
+    fn get(&self, actor: &str) -> Option<Vec<(String, String, bool)>> {
         let kept = self
             .0
             .lock()
@@ -61,7 +61,7 @@ impl Listings {
         (at.elapsed() < LISTING_AGE).then(|| list.clone())
     }
 
-    fn put(&self, actor: &str, list: Vec<(String, String)>) {
+    fn put(&self, actor: &str, list: Vec<(String, String, bool)>) {
         let mut kept = self
             .0
             .lock()
@@ -276,6 +276,29 @@ fn csrf(headers: &HeaderMap, app: &App) -> bool {
                 .is_some_and(|(s, a)| format!("{s}://{a}") == origin)
         })
 }
+/// Whether the access lets a person read the cases (moderators and above), not only edit them.
+fn may_view_cases(access: &Value) -> bool {
+    matches!(
+        access["level_name"].as_str(),
+        Some("moderator" | "admin" | "owner")
+    )
+}
+
+/// The pages that only show cases, which a moderator may open without the right to edit.
+fn cases_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    let Some((_, rest)) = path.strip_prefix("/g/").and_then(|p| p.split_once('/')) else {
+        return false;
+    };
+    rest == "cases"
+        || rest == "cases/export"
+        || rest
+            .strip_prefix("cases/")
+            .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
     // The health check is not held back by a busy dashboard.
     let _place = if request.uri().path() == "/healthz" {
@@ -290,6 +313,7 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     };
     let request_headers = request.headers().clone();
     let path = request.uri().path();
+    let read_cases = cases_read(request.method(), path);
     let language = lang(request.headers(), &app);
     let public = matches!(path, "/login" | "/app.css" | "/app.js" | "/healthz")
         || path.starts_with("/auth/");
@@ -312,7 +336,11 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
             )
         } else if let Some(actor) = user(request.headers(), &app) {
             match app.api.access(id, &actor).await {
-                Ok((access, _)) if access["allowed"] == true => run(next, request).await,
+                Ok((access, _))
+                    if access["allowed"] == true || (read_cases && may_view_cases(&access)) =>
+                {
+                    run(next, request).await
+                }
                 Ok(_) => error_page(
                     StatusCode::FORBIDDEN,
                     language,
@@ -571,20 +599,29 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
             return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
         };
         match answer {
-            Ok((access, _)) if access["allowed"] == true => found.push((order, id, name)),
+            Ok((access, _)) if access["allowed"] == true || may_view_cases(&access) => {
+                let editable = access["allowed"] == true;
+                found.push((order, id, name, editable));
+            }
             Ok(_) => {}
             Err(e) => return api_error(&e, l, &headers),
         }
     }
-    found.sort_by_key(|(order, _, _)| *order);
-    let allowed: Vec<(String, String)> =
-        found.into_iter().map(|(_, id, name)| (id, name)).collect();
+    found.sort_by_key(|(order, _, _, _)| *order);
+    let allowed: Vec<(String, String, bool)> = found
+        .into_iter()
+        .map(|(_, id, name, editable)| (id, name, editable))
+        .collect();
     app.listings.put(&actor, allowed.clone());
     servers_page(l, &headers, &allowed)
 }
-fn servers_page(l: Locale<'_>, headers: &HeaderMap, allowed: &[(String, String)]) -> Response {
-    if let [(id, _)] = allowed {
-        return Redirect::to(&format!("/g/{id}")).into_response();
+fn servers_page(
+    l: Locale<'_>,
+    headers: &HeaderMap,
+    allowed: &[(String, String, bool)],
+) -> Response {
+    if let [(id, _, editable)] = allowed {
+        return Redirect::to(&views::server_page(id, *editable)).into_response();
     }
     Html(views::servers(l, headers, allowed)).into_response()
 }

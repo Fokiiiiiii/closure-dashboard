@@ -48,16 +48,29 @@ pub(crate) fn error(l: Locale<'_>, headers: &HeaderMap, message: &str) -> String
     )
 }
 
-pub(crate) fn servers(l: Locale<'_>, headers: &HeaderMap, guilds: &[(String, String)]) -> String {
+/// Where a server opens: its overview for a person who may edit, its cases for a viewer.
+pub(crate) fn server_page(id: &str, editable: bool) -> String {
+    if editable {
+        format!("/g/{id}")
+    } else {
+        format!("/g/{id}/cases")
+    }
+}
+
+pub(crate) fn servers(
+    l: Locale<'_>,
+    headers: &HeaderMap,
+    guilds: &[(String, String, bool)],
+) -> String {
     let mut body = format!(
         "<main class=\"center\"><div class=\"server-column\"><h1>{}</h1><div class=\"server-list\">",
         l.text(keys::SERVERS)
     );
-    for (id, name) in guilds {
+    for (id, name, editable) in guilds {
         let _ = write!(
             body,
-            "<a class=\"card server-link\" href=\"/g/{}\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">›</span></a>",
-            escape(id),
+            "<a class=\"card server-link\" href=\"{}\"><span class=\"avatar\">{}</span><span>{}</span><span aria-hidden=\"true\">›</span></a>",
+            escape(&server_page(id, *editable)),
             avatar(name),
             escape(name)
         );
@@ -248,7 +261,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(axum::http::header::COOKIE, "theme=dark".parse().unwrap());
         let pages = [
-            servers(l, &headers, &[("42".into(), "<script>".into())]),
+            servers(l, &headers, &[("42".into(), "<script>".into(), true)]),
             error(l, &headers, "error"),
             shell(l, &headers, "42", "server", keys::MODULES, "content", false),
         ];

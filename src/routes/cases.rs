@@ -54,7 +54,18 @@ fn search_of(query: &HashMap<String, String>) -> Search {
     let state = take("state", &|v| views::CASE_STATES.contains(&v));
     let source = take("source", &|v| views::CASE_SOURCES.contains(&v));
     let text = take("text", &|v| v.chars().count() <= 100);
-    let hidden = take("hidden", &|v| v == "1") == "1";
+    // The bot takes `hidden` as true or false, so the form's 1 (or on) is sent as true.
+    let hidden = match query.get("hidden").map(|v| v.trim()) {
+        Some("1" | "on" | "true") => {
+            search.query.push(("hidden", "true".to_owned()));
+            true
+        }
+        Some("") | None => false,
+        Some(_) => {
+            search.bad = true;
+            false
+        }
+    };
     search.filter = views::CaseFilter {
         user,
         moderator,

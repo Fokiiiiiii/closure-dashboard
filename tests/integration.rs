@@ -69,6 +69,8 @@ struct Fake {
     form_body: Option<serde_json::Value>,
     rules: bool,
     structured: bool,
+    // A moderator who may read the cases but not change the dashboard.
+    viewer: bool,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -105,6 +107,19 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
             .push((path.clone(), String::from_utf8_lossy(&body).into_owned()));
     }
     fake.queries.push(format!("{path}?{query}"));
+    // The API takes `hidden` as a JSON-style bool: `1` is a 400 there.
+    if path.contains("/cases")
+        && query.split('&').any(|pair| {
+            pair.strip_prefix("hidden=")
+                .is_some_and(|v| !matches!(v, "true" | "false"))
+        })
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::ETAG, "\"1\"")],
+            "{}".to_owned(),
+        );
+    }
     fake.calls.push((path.clone(), auth, etag, actor));
     if let Some(status) = fake.status {
         return (status, [(header::ETAG, "\"1\"")], json!({"error":{"code":"secret-token", "message":"secret-token", "issues":[{"path":"x", "code":"x", "message":"secret-token"}]}}).to_string());
@@ -118,7 +133,11 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         return (status, [(header::ETAG, "\"1\"")], "{}".into());
     }
     let value = if path.ends_with("/access/123") {
-        json!({"allowed":!fake.denied})
+        if fake.viewer {
+            json!({"allowed":false,"level":3,"level_name":"moderator","reason":"level"})
+        } else {
+            json!({"allowed":!fake.denied})
+        }
     } else if path == "/v1/guilds" {
         if fake.secret_body {
             json!({"secret-token": "secret-token"})

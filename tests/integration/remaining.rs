@@ -234,9 +234,78 @@ async fn the_cases_are_listed_searched_and_paged_with_the_text_escaped() {
         .iter()
         .find(|query| query.contains("/cases?"))
         .expect("the bot was asked for the cases");
-    for part in ["kind=ban", "user=555", "hidden=1", "before=20", "limit=25"] {
+    for part in [
+        "kind=ban",
+        "user=555",
+        "hidden=true",
+        "before=20",
+        "limit=25",
+    ] {
         assert!(cases.contains(part), "{part} in {cases}");
     }
+}
+
+#[tokio::test]
+async fn the_cases_csv_asks_the_bot_for_hidden_as_true() {
+    let (config, state) = setup().await;
+    let app = router(config.clone());
+    let response = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/cases/export?hidden=1",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let asked = state.lock().unwrap().queries.clone();
+    let export = asked
+        .iter()
+        .find(|query| query.contains("/cases/export?"))
+        .expect("the bot was asked for the CSV");
+    assert!(export.ends_with("hidden=true"), "{export}");
+}
+
+#[tokio::test]
+async fn a_moderator_who_may_not_edit_reads_the_cases_and_nothing_else() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().viewer = true;
+    let app = router(config.clone());
+    for path in ["/g/42/cases", "/g/42/cases/export", "/g/42/cases/7"] {
+        let response = app
+            .clone()
+            .oneshot(request(&config, Method::GET, path, ""))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+    for (method, path) in [(Method::POST, "/g/42/cases/note"), (Method::GET, "/g/42")] {
+        let response = app
+            .clone()
+            .oneshot(request(&config, method, path, "target=555&reason=x"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn a_moderator_who_may_not_edit_is_sent_to_the_cases_of_the_server() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().viewer = true;
+    let app = router(config.clone());
+    let response = app
+        .oneshot(request(&config, Method::GET, "/", ""))
+        .await
+        .unwrap();
+    assert!(response.status().is_redirection(), "{}", response.status());
+    let location = response
+        .headers()
+        .get(axum::http::header::LOCATION)
+        .and_then(|value| value.to_str().ok());
+    assert_eq!(location, Some("/g/42/cases"));
 }
 
 #[tokio::test]
