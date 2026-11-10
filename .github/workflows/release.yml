@@ -1,0 +1,32 @@
+name: macOS arm64 preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+        with:
+          target: aarch64-apple-darwin
+          cache: true
+      - run: cargo build --release --locked --target aarch64-apple-darwin
+      - name: Archive and checksum
+        run: |
+          tar -czf closure-dashboard-macos-arm64.tar.gz -C target/aarch64-apple-darwin/release closure-dashboard
+          shasum -a 256 closure-dashboard-macos-arm64.tar.gz > closure-dashboard-macos-arm64.tar.gz.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: closure-dashboard-macos-arm64-preview
+          path: |
+            closure-dashboard-macos-arm64.tar.gz
+            closure-dashboard-macos-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
