@@ -113,8 +113,17 @@ pub(super) fn control(
             &directory["roles"]
         };
         let mut found = value.is_empty();
+        let kinds: Vec<&str> = field.schema["x-ui"]["channel_kinds"]
+            .as_array()
+            .map_or_else(
+                || vec!["text"],
+                |kinds| kinds.iter().filter_map(Value::as_str).collect(),
+            );
         for item in list.as_array().into_iter().flatten() {
-            if (widget == "channel" && item["kind"] != "text")
+            if (widget == "channel"
+                && !item["kind"]
+                    .as_str()
+                    .is_some_and(|kind| kinds.contains(&kind)))
                 || (widget == "role" && item["managed"] == true)
             {
                 continue;
@@ -701,6 +710,51 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
 
 #[cfg(test)]
 mod tests {
+    use super::control;
+
+    fn channel_field(x_ui: &serde_json::Value) -> crate::form::Field {
+        let module = json!({"properties": {"config": {"properties": {"category": {"type": "string", "x-ui": x_ui.clone()}}}}});
+        crate::form::fields(&module).remove(0)
+    }
+
+    fn channel_directory() -> serde_json::Value {
+        json!({"channels": [
+            {"id": "1", "name": "general", "kind": "text"},
+            {"id": "2", "name": "Tickets", "kind": "category"}
+        ]})
+    }
+
+    #[test]
+    fn a_channel_widget_offers_the_kinds_its_schema_names() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let category = channel_field(&json!({"widget": "channel", "channel_kinds": ["category"]}));
+        let html = control(
+            catalogs.locale("en"),
+            &category,
+            0,
+            "",
+            Some(&channel_directory()),
+            false,
+        );
+        assert!(html.contains("value=\"2\""), "{html}");
+        assert!(!html.contains("value=\"1\""), "{html}");
+    }
+
+    #[test]
+    fn a_channel_widget_offers_text_channels_when_no_kind_is_named() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let text = channel_field(&json!({"widget": "channel"}));
+        let html = control(
+            catalogs.locale("en"),
+            &text,
+            0,
+            "",
+            Some(&channel_directory()),
+            false,
+        );
+        assert!(html.contains("value=\"1\""), "{html}");
+        assert!(!html.contains("value=\"2\""), "{html}");
+    }
     use serde_json::json;
 
     use super::cell_text;

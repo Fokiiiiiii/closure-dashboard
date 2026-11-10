@@ -179,7 +179,8 @@ pub(crate) use cases::{
     case as case_page, cases as cases_page,
 };
 pub(crate) use composer::{
-    Side as ComposerSide, Waiting as ComposerWaiting, composer_page, preview as composer_preview,
+    Names as ComposerNames, Side as ComposerSide, Waiting as ComposerWaiting, composer_page,
+    preview as composer_preview,
 };
 pub(crate) use editor::{
     Ctx, Item, collection_page, datalist_html, editor_field, editor_node, editor_page, object_card,

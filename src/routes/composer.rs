@@ -106,8 +106,21 @@ fn text_channels(directory: Option<&Value>) -> Vec<(String, String)> {
         .collect()
 }
 
-fn fragment(l: crate::i18n::Locale<'_>, form: &Form, names: &[String]) -> Response {
-    Html(views::composer_preview(l, form, &samples(l, names))).into_response()
+async fn fragment(
+    app: &App,
+    id: &str,
+    l: crate::i18n::Locale<'_>,
+    form: &Form,
+    names: &[String],
+) -> Response {
+    let directory = app.api.directory(id).await.ok().map(|v| v.0);
+    let role_names = roles(directory.as_ref());
+    let channel_names = text_channels(directory.as_ref());
+    let known = views::ComposerNames {
+        roles: &role_names,
+        channels: &channel_names,
+    };
+    Html(views::composer_preview(l, form, &samples(l, names), known)).into_response()
 }
 
 pub(super) async fn send_page(
@@ -271,7 +284,7 @@ pub(super) async fn send_post(
     let l = lang(&headers, &app);
     let mut request = posted(pairs);
     if query.contains_key("preview") {
-        return fragment(l, &request.form, &[]);
+        return fragment(&app, &id, l, &request.form, &[]).await;
     }
     if edit(&mut request.form, &request.op) {
         return send_view(&app, &id, &headers, request.form, request.keep, Vec::new()).await;
@@ -451,7 +464,7 @@ pub(super) async fn setting_post(
             Ok(data) => message_field(&data, &module, &field).unwrap_or_default(),
             Err(_) => Vec::new(),
         };
-        return fragment(l, &request.form, &names);
+        return fragment(&app, &id, l, &request.form, &names).await;
     }
     if edit(&mut request.form, &request.op) {
         let shown = Some((request.form, Vec::new()));

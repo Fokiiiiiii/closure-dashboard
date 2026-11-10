@@ -53,33 +53,43 @@ fn wrap(text: &str, mark: &str, open: &str, close: &str) -> String {
     out
 }
 
+/// The names the directory knows for the roles and channels a message mentions, by ID.
+#[derive(Clone, Copy)]
+pub(crate) struct Names<'a> {
+    pub roles: &'a [(String, String)],
+    pub channels: &'a [(String, String)],
+}
+
 /// Mentions and links, in text that is already escaped.
-fn mentions_and_links(text: &str) -> String {
+fn mentions_and_links(l: Locale<'_>, text: &str, names: Names<'_>) -> String {
     let mut out = String::new();
     let mut rest = text;
     while let Some(start) = rest.find("&lt;") {
         out.push_str(&rest[..start]);
         let tail = &rest[start + 4..];
         let kind = if tail.starts_with("@&amp;") {
-            Some(("@&amp;", "ロール"))
+            Some(("@&amp;", '@', keys::CP_MENTION_ROLE, names.roles))
         } else if tail.starts_with('@') {
-            Some(("@", "ユーザー"))
+            Some(("@", '@', keys::CP_MENTION_USER, Default::default()))
         } else if tail.starts_with('#') {
-            Some(("#", "チャンネル"))
+            Some(("#", '#', keys::CP_MENTION_CHANNEL, names.channels))
         } else {
             None
         };
-        let parsed = kind.and_then(|(sign, name)| {
-            let digits = &tail[sign.len()..];
+        let parsed = kind.and_then(|(prefix, sign, key, known)| {
+            let digits = &tail[prefix.len()..];
             let end = digits.find("&gt;")?;
-            (end > 0 && digits[..end].bytes().all(|b| b.is_ascii_digit())).then_some((
-                sign.chars().next().unwrap_or('@'),
-                name,
-                start + 4 + sign.len() + end + 4,
-            ))
+            let id = &digits[..end];
+            (end > 0 && id.bytes().all(|b| b.is_ascii_digit())).then(|| {
+                let label = known
+                    .iter()
+                    .find(|(known_id, _)| known_id == id)
+                    .map_or_else(|| format!("{} {id}", l.text(key)), |(_, name)| escape(name));
+                (sign, label, start + 4 + prefix.len() + end + 4)
+            })
         });
-        if let Some((sign, name, consumed)) = parsed {
-            let _ = write!(out, "<span class=\"dc-mention\">{sign}{name}</span>");
+        if let Some((sign, label, consumed)) = parsed {
+            let _ = write!(out, "<span class=\"dc-mention\">{sign}{label}</span>");
             rest = &rest[consumed..];
         } else {
             out.push_str("&lt;");
@@ -111,7 +121,7 @@ fn link(text: &str) -> String {
 }
 
 /// Discord's text styling, for the preview: bold, italic, underline, strike, code, links.
-fn markdown(source: &str) -> String {
+fn markdown(l: Locale<'_>, source: &str, names: Names<'_>) -> String {
     let escaped = escape(source);
     let mut out = String::new();
     for (n, part) in escaped.split('`').enumerate() {
@@ -123,7 +133,7 @@ fn markdown(source: &str) -> String {
         let styled = wrap(&styled, "**", "<strong>", "</strong>");
         let styled = wrap(&styled, "__", "<u>", "</u>");
         let styled = wrap(&styled, "*", "<em>", "</em>");
-        out.push_str(&mentions_and_links(&styled));
+        out.push_str(&mentions_and_links(l, &styled, names));
     }
     out.replace('\n', "<br>")
 }
@@ -143,7 +153,14 @@ fn has_content(form: &Form, n: usize) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-fn embed_preview(form: &Form, n: usize, samples: &[(String, String)], now: &str) -> String {
+fn embed_preview(
+    l: Locale<'_>,
+    form: &Form,
+    n: usize,
+    samples: &[(String, String)],
+    now: &str,
+    names: Names<'_>,
+) -> String {
     let e = format!("e.{n}");
     let text = |key: &str| fill(get(form, &format!("{e}.{key}")), samples);
     let color = match get(form, &format!("{e}.color")) {
@@ -188,7 +205,7 @@ fn embed_preview(form: &Form, n: usize, samples: &[(String, String)], now: &str)
         let _ = write!(
             main,
             "<div class=\"dc-description\">{}</div>",
-            markdown(&description)
+            markdown(l, &description, names)
         );
     }
     let mut fields = String::new();
@@ -210,7 +227,7 @@ fn embed_preview(form: &Form, n: usize, samples: &[(String, String)], now: &str)
                 ""
             },
             escape(&name),
-            markdown(&value)
+            markdown(l, &value, names)
         );
     }
     if !fields.is_empty() {
@@ -256,7 +273,12 @@ fn embed_preview(form: &Form, n: usize, samples: &[(String, String)], now: &str)
 }
 
 /// The message as Discord shows it. `samples` are the examples the variables stand for.
-pub(crate) fn preview(l: Locale<'_>, form: &Form, samples: &[(String, String)]) -> String {
+pub(crate) fn preview(
+    l: Locale<'_>,
+    form: &Form,
+    samples: &[(String, String)],
+    names: Names<'_>,
+) -> String {
     let now = l.text(keys::CP_NOW);
     let content = fill(get(form, "c"), samples);
     let mut out = format!(
@@ -266,14 +288,14 @@ pub(crate) fn preview(l: Locale<'_>, form: &Form, samples: &[(String, String)]) 
         let _ = write!(
             out,
             "<div class=\"dc-content\">{}</div>",
-            markdown(&content)
+            markdown(l, &content, names)
         );
     }
     let mut shown = 0;
     for n in composer::numbers(form, "e") {
         if has_content(form, n) {
             shown += 1;
-            out.push_str(&embed_preview(form, n, samples, &now));
+            out.push_str(&embed_preview(l, form, n, samples, &now, names));
         }
     }
     if content.trim().is_empty() && shown == 0 {
@@ -658,6 +680,15 @@ pub(crate) fn composer_page(
             text
         );
     }
+    let names = match side {
+        Side::Send {
+            channels, roles, ..
+        } => Names { roles, channels },
+        Side::Setting { .. } => Names {
+            roles: &[],
+            channels: &[],
+        },
+    };
     let mut left = String::new();
     let mut pending = None;
     match side {
@@ -772,9 +803,61 @@ pub(crate) fn composer_page(
         body,
         "<form method=\"post\" action=\"{action}\" class=\"composer\" data-preview=\"{action}?preview=1\"><button class=\"sr-only\" type=\"submit\" name=\"op\" value=\"{done_op}\" tabindex=\"-1\" aria-hidden=\"true\"></button><div class=\"composer-edit\">{left}</div><aside class=\"composer-side\"><div class=\"cp-preview-label\">{}</div><div id=\"preview\">{}</div></aside><div class=\"save-bar\">{back_link}{schedule}<button class=\"button primary\" type=\"submit\" name=\"op\" value=\"{done_op}\">{}</button></div></form>",
         l.text(keys::CP_PREVIEW),
-        preview(l, form, samples),
+        preview(l, form, samples, names),
         l.text(done_key),
         action = escape(action)
     );
     shell(l, headers, id, guild, keys::COMPOSE, &body, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{Catalogs, REGISTRY};
+
+    fn preview_of(tag: &str, content: &str) -> String {
+        let catalogs = Catalogs::new(REGISTRY).unwrap();
+        let form = Form::from([("c".to_owned(), content.to_owned())]);
+        preview(
+            catalogs.locale(tag),
+            &form,
+            &[],
+            Names {
+                roles: &[],
+                channels: &[],
+            },
+        )
+    }
+
+    #[test]
+    fn roles_and_channels_the_directory_knows_show_their_names() {
+        let roles = [("456".to_owned(), "<img src=x>".to_owned())];
+        let channels = [("789".to_owned(), "general".to_owned())];
+        let catalogs = Catalogs::new(REGISTRY).unwrap();
+        let form = Form::from([("c".to_owned(), "<@&456> <#789>".to_owned())]);
+        let names = Names {
+            roles: &roles,
+            channels: &channels,
+        };
+        let html = preview(catalogs.locale("en"), &form, &[], names);
+        assert!(html.contains("#general"), "{html}");
+        assert!(html.contains("&lt;img src=x&gt;"), "{html}");
+        assert!(!html.contains("Role 456"), "{html}");
+    }
+
+    #[test]
+    fn unknown_mentions_are_labelled_in_english_on_an_english_page() {
+        let html = preview_of("en", "<@&456> <@123> <#789>");
+        assert!(html.contains("@Role 456"), "{html}");
+        assert!(html.contains("@User 123"), "{html}");
+        assert!(html.contains("#Channel 789"), "{html}");
+    }
+
+    #[test]
+    fn unknown_mentions_are_labelled_in_japanese_on_a_japanese_page() {
+        let html = preview_of("ja", "<@&456> <@123> <#789>");
+        assert!(html.contains("@ロール 456"), "{html}");
+        assert!(html.contains("@ユーザー 123"), "{html}");
+        assert!(html.contains("#チャンネル 789"), "{html}");
+    }
 }
