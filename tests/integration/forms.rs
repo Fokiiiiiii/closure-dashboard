@@ -28,14 +28,47 @@ pub(super) fn bot_data(
                 json!({"anyOf": [{"type": "object", "properties": parts}]});
         }
         if fake.rules {
-            schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] = json!({"anyOf":[{"type":"object","properties":{"auto_delete":{
-                "type":"array","maxItems":25,"items":{"type":"object","required":["channel","after"],
-                "properties":{
-                    "channel":{"type":"string","pattern":"^[1-9][0-9]{0,19}$"},
-                    "after":{"type":"string","pattern":"^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
-                    "skip_pinned":{"type":"boolean","default":true}}}},
-                "texts":{"description":"texts","x-ui":{"widget":"entries"}},
-                "keep":{"x-ui":{"widget":"flag-or-roles"}}}}]});
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] =
+                json!({"anyOf": [{"type": "object", "properties": {
+                    "auto_delete": {
+                        "type": "array",
+                        "maxItems": 25,
+                        "items": {
+                            "type": "object",
+                            "required": ["channel", "after"],
+                            "properties": {
+                                "channel": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+                                "after": {"type": "string", "pattern": "^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
+                                "skip_pinned": {"type": "boolean", "default": true}
+                            }
+                        }
+                    },
+                    "texts": {"description": "texts", "x-ui": {"widget": "entries"}},
+                    "keep": {"x-ui": {"widget": "flag-or-roles"}},
+                    "panels": {
+                        "type": "array",
+                        "maxItems": 25,
+                        "items": {
+                            "type": "object",
+                            "required": ["id"],
+                            "properties": {
+                                "id": {"type": "string"},
+                                "category": {"type": "string", "maxLength": 4},
+                                "staff_roles": {
+                                    "type": "array",
+                                    "maxItems": 3,
+                                    "items": {"type": "string"},
+                                    "x-ui": {"widget": "roles"}
+                                }
+                            }
+                        }
+                    },
+                    "staff_roles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "x-ui": {"widget": "roles"}
+                    }
+                }}]});
         }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
             json!("<script>description</script>");
@@ -70,9 +103,28 @@ pub(super) fn bot_data(
         let mut config = fixture(include_str!("../fixtures/config-basic.json"));
         config["moderator_roles"] = json!([13, "99"]);
         config["modules"]["moderation"]["config"]["timeout_role"] = json!("13");
+        if fake.rules {
+            config["modules"]["channels"]["config"] = json!({
+                "panels": [{
+                    "id": "existing",
+                    "category": "help",
+                    "staff_roles": ["13", "99"]
+                }],
+                "staff_roles": ["13"]
+            });
+        }
         config
     } else if path.ends_with("/effective") {
-        fixture(include_str!("../fixtures/api-eff.json"))
+        let mut effective = fixture(include_str!("../fixtures/api-eff.json"));
+        if fake.rules {
+            effective["modules"]["channels"]["config"]["panels"] = json!([{
+                "id": "existing",
+                "category": "help",
+                "staff_roles": ["13", "99"]
+            }]);
+            effective["modules"]["channels"]["config"]["staff_roles"] = json!(["13"]);
+        }
+        effective
     } else if path.ends_with("/directory") {
         if fake.directory_failure {
             return (
@@ -168,6 +220,160 @@ async fn the_parts_of_a_module_are_pages_of_their_own() {
     let page = html(result).await;
     assert!(page.contains("role=\"alert\""));
     assert!(page.contains("<option value=\"11\" selected>"));
+}
+
+#[tokio::test]
+async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.rules = true;
+    }
+    let path = "/g/42/modules/channels";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    for expected in [
+        "name=\"role_mode:panels.0.staff_roles\"",
+        "name=\"role_mode:staff_roles\"",
+        "name=\"f.staff_roles\"",
+        "role=\"group\" aria-labelledby=",
+        "role=\"radiogroup\"",
+        "Unknown role 99",
+        "name=\"f.panels.0.staff_roles\"",
+    ] {
+        assert!(page.contains(expected), "{expected}: {page}");
+    }
+
+    let selected = "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Astaff_roles=set&f.staff_roles=13&f.staff_roles=99";
+    assert_eq!(
+        response(&config, Method::POST, path, selected)
+            .await
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["panels"][0]["staff_roles"],
+        json!(["13", "99"])
+    );
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["staff_roles"],
+        json!(["13", "99"])
+    );
+
+    let default = "etag=%221%22&role_mode%3Apanels.0.staff_roles=default&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Astaff_roles=default&f.staff_roles=13";
+    assert_eq!(
+        response(&config, Method::POST, path, default)
+            .await
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert!(sent["modules"]["channels"]["config"]["panels"][0]
+        .get("staff_roles")
+        .is_none());
+    assert!(sent["modules"]["channels"]["config"]
+        .get("staff_roles")
+        .is_none());
+
+    let explicit_empty = "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&role_mode%3Astaff_roles=set";
+    assert_eq!(
+        response(&config, Method::POST, path, explicit_empty)
+            .await
+            .status(),
+        StatusCode::SEE_OTHER
+    );
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["panels"][0]["staff_roles"],
+        json!([])
+    );
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["staff_roles"],
+        json!([])
+    );
+
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&role_mode%3Apanels.0.category=set&f.panels.0.id=existing&f.panels.0.category=help"
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&f.panels.0.category=other"
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&etag=%221%22&role_mode%3Apanels.0.staff_roles=set"
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            "etag=%221%22&role_mode%3Apanels.999.staff_roles=set&f.panels.999.id=forged&f.panels.999.staff_roles=13"
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn panel_row_indices_survive_remove_and_other_cell_error() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.rules = true;
+    }
+    let path = "/g/42/modules/channels";
+    let failed = response(
+        &config,
+        Method::POST,
+        path,
+        "etag=%221%22&f.panels.0.x=1&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Apanels.1.staff_roles=set&f.panels.1.id=new&f.panels.1.category=toolong&f.panels.1.staff_roles=13&f.panels.1.staff_roles=99",
+    )
+    .await;
+    assert_eq!(failed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let page = html(failed).await;
+    assert!(page.contains("name=\"role_mode:panels.1.staff_roles\" value=\"set\" checked"));
+    assert!(page.contains("name=\"f.panels.1.staff_roles\""));
+    assert!(page.contains("value=\"99\" checked"));
+
+    let saved = response(
+        &config,
+        Method::POST,
+        path,
+        "etag=%221%22&f.panels.0.x=1&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Apanels.1.staff_roles=set&f.panels.1.id=new&f.panels.1.category=okay&f.panels.1.staff_roles=13&f.panels.1.staff_roles=99",
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let sent = state.lock().unwrap().form_body.clone().unwrap();
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["panels"],
+        json!([{"id": "new", "category": "okay", "staff_roles": ["13", "99"]}])
+    );
 }
 
 #[tokio::test]

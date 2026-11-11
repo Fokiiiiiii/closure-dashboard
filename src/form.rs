@@ -1,5 +1,5 @@
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
@@ -321,6 +321,12 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
                     ),
                     None => Kind::String,
                 },
+                "array"
+                    if schema["items"]["type"] == "string"
+                        && schema["x-ui"]["widget"] == "roles" =>
+                {
+                    Kind::Roles
+                }
                 "array" if schema["items"]["type"] == "string" => Kind::Words,
                 _ => return None,
             };
@@ -332,6 +338,33 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
             })
         })
         .collect()
+}
+
+/// Whether a list column can be rendered as a role picker without collapsing stored duplicates.
+#[must_use]
+pub fn roles_picker(
+    kind: &Kind,
+    schema: &Value,
+    current: Option<&Value>,
+    directory: Option<&Value>,
+) -> bool {
+    if *kind != Kind::Roles
+        || schema["x-ui"]["widget"] != "roles"
+        || directory
+            .and_then(|directory| directory["roles"].as_array())
+            .is_none()
+    {
+        return false;
+    }
+    let Some(current) = current.filter(|value| !value.is_null()) else {
+        return true;
+    };
+    let Some(ids) = current.as_array() else {
+        return false;
+    };
+    let mut seen = HashSet::new();
+    ids.iter()
+        .all(|id| id.as_str().is_some_and(|id| seen.insert(id)))
 }
 
 #[must_use]
@@ -417,6 +450,11 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         }
     } else if ty == "array" && schema["items"]["type"] == "object" {
         Kind::List(columns(&schema["items"])?)
+    } else if ty == "array"
+        && schema["items"]["type"] == "string"
+        && widget == Some("roles")
+    {
+        Kind::Roles
     } else if ty == "array" && schema["items"]["type"] == "string" {
         // Ids and texts, told apart by commas: a setting is not dropped from the form for being a
         // list of strings.
@@ -551,7 +589,13 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             }
         },
         // A dash is a list that is empty on purpose, not one that is left to what it inherits.
-        Kind::Words | Kind::Roles if input.trim() == "-" => Some(json!([])),
+        Kind::Words if input.trim() == "-" => Some(json!([])),
+        Kind::Roles if input.trim() == "-" => {
+            field.schema["minItems"]
+                .as_u64()
+                .is_none_or(|min| min == 0)
+                .then(|| json!([]))
+        }
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -573,6 +617,16 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
                 let digits = v.strip_prefix('+').unwrap_or(v);
                 digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit())
             }) {
+                return None;
+            }
+            let count = values.len() as u64;
+            if field.schema["minItems"]
+                .as_u64()
+                .is_some_and(|min| count < min)
+                || field.schema["maxItems"]
+                    .as_u64()
+                    .is_some_and(|max| count > max)
+            {
                 return None;
             }
             Some(json!(values))
@@ -867,6 +921,65 @@ mod tests {
     }
 
     #[test]
+    fn an_array_of_roles_uses_the_roles_kind_only_when_its_schema_requests_it() {
+        let module = json!({"properties": {"config": {"properties": {"panels": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "id": {"type": "string"},
+                "staff_roles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-ui": {"widget": "roles"}
+                },
+                "tags": {"type": "array", "items": {"type": "string"}}
+            }}
+        }}}}});
+        let fields = fields(&module);
+        let Kind::List(columns) = &fields[0].kind else {
+            panic!("not a list");
+        };
+
+        assert_eq!(
+            columns.iter().find(|column| column.name == "staff_roles").unwrap().kind,
+            Kind::Roles
+        );
+        assert_eq!(
+            columns.iter().find(|column| column.name == "tags").unwrap().kind,
+            Kind::Words
+        );
+
+        let root = json!({"properties": {"config": {"properties": {"staff_roles": {
+            "type": "array",
+            "items": {"type": "string"},
+            "x-ui": {"widget": "roles"}
+        }}}}});
+        assert_eq!(fields(&root)[0].kind, Kind::Roles);
+    }
+
+    #[test]
+    fn a_roles_picker_requires_a_directory_and_unique_stored_ids() {
+        let module = json!({"properties": {"config": {"properties": {"panels": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"staff_roles": {
+                "type": "array",
+                "items": {"type": "string"},
+                "x-ui": {"widget": "roles"}
+            }}}
+        }}}}});
+        let fields = fields(&module);
+        let Kind::List(columns) = &fields[0].kind else {
+            panic!("not a list");
+        };
+        let column = &columns[0];
+        let directory = json!({"roles": []});
+
+        assert!(roles_picker(&column.kind, &column.schema, None, Some(&directory)));
+        assert!(roles_picker(&column.kind, &column.schema, Some(&json!(["13", "99"])), Some(&directory)));
+        assert!(!roles_picker(&column.kind, &column.schema, Some(&json!(["13", "13"])), Some(&directory)));
+        assert!(!roles_picker(&column.kind, &column.schema, Some(&json!(["13"])), None));
+    }
+
+    #[test]
     fn a_list_reads_its_rows_and_drops_removed_and_empty_ones() {
         let rows = rows_of(&[
             ("auto_delete.0.channel", "10"),
@@ -1153,6 +1266,28 @@ mod tests {
         assert_eq!(parse(&field, "1, 2"), Some(json!(["1", "2"])));
         assert_eq!(parse(&field, "-"), Some(json!([])));
         // Left blank it goes back to what it inherits.
+        assert_eq!(parse(&field, ""), Some(Value::Null));
+    }
+
+    #[test]
+    fn a_list_of_roles_respects_item_count_constraints() {
+        let field = Field {
+            kind: Kind::Roles,
+            ..field(
+                "staff_roles",
+                &json!({
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {"type": "string"}
+                }),
+            )
+            .unwrap()
+        };
+        assert_eq!(parse(&field, "13"), Some(json!(["13"])));
+        assert_eq!(parse(&field, "13,99"), Some(json!(["13", "99"])));
+        assert_eq!(parse(&field, "13,99,100"), None);
+        assert_eq!(parse(&field, "-"), None);
         assert_eq!(parse(&field, ""), Some(Value::Null));
     }
 

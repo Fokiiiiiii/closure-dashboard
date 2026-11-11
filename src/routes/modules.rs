@@ -74,6 +74,205 @@ fn in_field(field: &form::Field, name: &str) -> bool {
                 .is_some_and(|rest| rest.starts_with('.')))
 }
 
+fn role_input_value(name: &str, schema: &Value, mode: &str, values: Vec<String>) -> Option<String> {
+    if mode == "default" {
+        return Some(String::new());
+    }
+    if values.is_empty() || (values.len() == 1 && values[0].trim().is_empty()) {
+        return Some("-".into());
+    }
+    if values.len() == 1 {
+        return Some(values.into_iter().next()?);
+    }
+    let mut role_schema = schema.clone();
+    if let Some(object) = role_schema.as_object_mut() {
+        object.remove("minItems");
+        object.remove("maxItems");
+    }
+    let cell = form::Field {
+        name: name.to_owned(),
+        label: name.to_owned(),
+        kind: form::Kind::Roles,
+        schema: role_schema,
+    };
+    let mut ids = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(Value::Array(parsed)) = form::parse(&cell, &value) else {
+            return None;
+        };
+        if parsed.len() != 1 {
+            return None;
+        }
+        ids.push(parsed[0].as_str()?.to_owned());
+    }
+    Some(ids.join(","))
+}
+
+fn role_field(field: &form::Field) -> bool {
+    field.kind == form::Kind::Roles && field.schema["x-ui"]["widget"] == "roles"
+}
+
+fn default_role_cell_text(
+    effective: &Value,
+    field: &form::Field,
+    row: usize,
+    column: &str,
+) -> Option<String> {
+    let form::Kind::List(columns) = &field.kind else {
+        return None;
+    };
+    if !columns.iter().any(|cell| {
+        cell.name == column
+            && cell.kind == form::Kind::Roles
+            && cell.schema["x-ui"]["widget"] == "roles"
+    }) {
+        return None;
+    }
+    let ids = form::lookup(effective, &field.name)?
+        .as_array()?
+        .get(row)?
+        .get(column)?
+        .as_array()?;
+    let ids = ids.iter().map(Value::as_str).collect::<Option<Vec<_>>>()?;
+    Some(if ids.is_empty() { "-".to_owned() } else { ids.join(",") })
+}
+
+fn role_column<'a>(field: &'a form::Field, name: &str) -> Option<(usize, &'a form::Column)> {
+    let prefix = format!("{}.", field.name);
+    let rest = name.strip_prefix(&prefix)?;
+    let (row, column_name) = rest.split_once('.')?;
+    let row = row.parse().ok()?;
+    let form::Kind::List(columns) = &field.kind else {
+        return None;
+    };
+    let column = columns.iter().find(|column| {
+        column.name == column_name
+            && column.kind == form::Kind::Roles
+            && column.schema["x-ui"]["widget"] == "roles"
+    })?;
+    Some((row, column))
+}
+
+fn list_cell<'a>(field: &form::Field, name: &'a str) -> Option<(usize, &'a str)> {
+    let rest = name.strip_prefix(&format!("{}.", field.name))?;
+    let (row, column) = rest.split_once('.')?;
+    Some((row.parse().ok()?, column))
+}
+
+fn current_list<'a>(data: &'a Data, module: &str, field: &form::Field) -> Option<&'a Value> {
+    form::lookup(&data.stored["modules"][module]["config"], &field.name)
+        .filter(|value| !value.is_null())
+        .or_else(|| form::lookup(&data.effective["modules"][module]["config"], &field.name))
+}
+
+fn role_row_allowed(field: &form::Field, row: usize, current_len: usize) -> bool {
+    if row < current_len {
+        return true;
+    }
+    row == current_len
+        && field.schema["maxItems"]
+            .as_u64()
+            .is_none_or(|max| (current_len as u64) < max)
+}
+
+fn role_defaults_for_compare(
+    field: &form::Field,
+    value: &Value,
+    baseline: Option<&Value>,
+    modes: &HashMap<String, String>,
+    input: &HashMap<String, String>,
+) -> Value {
+    let form::Kind::List(columns) = &field.kind else {
+        return value.clone();
+    };
+    let Some(baseline_rows) = baseline.and_then(Value::as_array) else {
+        return value.clone();
+    };
+    let Some(value_rows) = value.as_array() else {
+        return value.clone();
+    };
+    let prefix = format!("{}.", field.name);
+    if value_rows.len() != baseline_rows.len()
+        || input.iter().any(|(key, value)| {
+            key.strip_prefix(&prefix)
+                .and_then(|rest| rest.split_once('.'))
+                .is_some_and(|(_, part)| part == "x" && value == "1")
+        })
+    {
+        return value.clone();
+    }
+    let mut compared = value.clone();
+    let Some(rows) = compared.as_array_mut() else {
+        return compared;
+    };
+    for (index, row) in rows.iter_mut().enumerate() {
+        let Some(object) = row.as_object_mut() else {
+            continue;
+        };
+        for column in columns.iter().filter(|column| {
+            column.kind == form::Kind::Roles && column.schema["x-ui"]["widget"] == "roles"
+        }) {
+            let cell = format!("{}.{index}.{}", field.name, column.name);
+            if modes.get(&cell).is_some_and(|mode| mode == "default") {
+                if let Some(original) = baseline_rows
+                    .get(index)
+                    .and_then(|row| row.get(&column.name))
+                    .filter(|value| !value.is_null())
+                {
+                    object.insert(column.name.clone(), original.clone());
+                } else {
+                    object.remove(&column.name);
+                }
+            }
+        }
+    }
+    compared
+}
+
+fn has_role_columns(field: &form::Field) -> bool {
+    matches!(&field.kind, form::Kind::List(columns) if columns.iter().any(|column| {
+        column.kind == form::Kind::Roles && column.schema["x-ui"]["widget"] == "roles"
+    }))
+}
+
+fn role_mode_sets(field: &form::Field, modes: &HashMap<String, String>) -> bool {
+    if role_field(field) {
+        modes.get(&field.name).is_some_and(|mode| mode == "set")
+    } else {
+        modes.iter().any(|(cell, mode)| {
+            mode == "set" && role_column(field, cell).is_some()
+        })
+    }
+}
+
+fn should_write_role_field(
+    field: &form::Field,
+    value: &Value,
+    stored: Option<&Value>,
+    effective: Option<&Value>,
+    modes: &HashMap<String, String>,
+) -> bool {
+    form::should_write(value, stored, effective)
+        || (role_mode_sets(field, modes) && stored.is_none())
+}
+
+fn unset_default_role_overrides(
+    config: &mut Value,
+    fields: &[form::Field],
+    modes: &HashMap<String, String>,
+) {
+    let Some(config) = config.as_object_mut() else {
+        return;
+    };
+    for field in fields {
+        if role_field(field)
+            && modes.get(&field.name).is_some_and(|mode| mode == "default")
+        {
+            config.remove(&field.name);
+        }
+    }
+}
+
 pub(super) fn return_path(app: &App, headers: &HeaderMap, id: &str) -> String {
     headers
         .get(header::REFERER)
@@ -276,16 +475,42 @@ pub(super) async fn save_part(
     };
     let fields = form::fields(schema);
     let mut input = HashMap::new();
+    let mut role_values = HashMap::<String, Vec<String>>::new();
+    let mut role_modes = HashMap::<String, String>::new();
     let mut etag = None;
     for (name, value) in pairs {
         if name == "etag" {
             if etag.replace(value).is_some() {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
+        } else if let Some(cell) = name.strip_prefix("role_mode:") {
+            if role_modes.insert(cell.to_owned(), value).is_some() {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+            }
         } else if let Some(name) = name.strip_prefix("f.") {
             let Some(field) = fields.iter().find(|f| in_field(f, name)) else {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
+            if has_role_columns(field) {
+                let Some((row, column)) = list_cell(field, name) else {
+                    return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+                };
+                let form::Kind::List(columns) = &field.kind else {
+                    return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+                };
+                let current_len = current_list(&data, &module, field)
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len);
+                if !role_row_allowed(field, row, current_len)
+                    || (column != "x" && !columns.iter().any(|cell| cell.name == column))
+                {
+                    return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+                }
+            }
+            if role_column(field, name).is_some() || (role_field(field) && field.name == name) {
+                role_values.entry(name.to_owned()).or_default().push(value);
+                continue;
+            }
             // A switch is sent twice, as "false" and then "true" when it is on; a list holds switches.
             if let Some(previous) = input.insert(name.to_owned(), value.clone())
                 && !(matches!(field.kind, form::Kind::Boolean | form::Kind::List(_))
@@ -303,6 +528,88 @@ pub(super) async fn save_part(
     };
     if etag != data.etag {
         return conflict(&app, &headers, &id, &module, part);
+    }
+    for (cell, mode) in &role_modes {
+        if mode != "default" && mode != "set" {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        }
+        if let Some(field) = fields
+            .iter()
+            .find(|field| field.name == *cell && role_field(field))
+        {
+            let values = role_values.remove(cell).unwrap_or_default();
+            let Some(raw) = role_input_value(cell, &field.schema, mode, values) else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+            };
+            if mode == "default" {
+                input.remove(cell);
+            } else {
+                input.insert(cell.clone(), raw);
+            }
+            input.insert(format!("role-mode:{cell}"), mode.clone());
+            continue;
+        }
+        let Some(field) = fields
+            .iter()
+            .find(|field| role_column(field, cell).is_some())
+        else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        let Some((row, column)) = role_column(field, cell) else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        let current_len = current_list(&data, &module, field)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        if !role_row_allowed(field, row, current_len) || (mode == "default" && column.required) {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        }
+        let values = role_values.remove(cell).unwrap_or_default();
+        let Some(mut raw) = role_input_value(cell, &column.schema, mode, values) else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        if mode == "default"
+            && let Some(value) = default_role_cell_text(
+                &data.effective["modules"][&module]["config"],
+                field,
+                row,
+                &column.name,
+            )
+        {
+            raw = value;
+        }
+        input.insert(cell.clone(), raw);
+        input.insert(format!("role-mode:{cell}"), mode.clone());
+    }
+    for (cell, values) in role_values {
+        if values.len() != 1 {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        }
+        let Some(field) = fields.iter().find(|field| {
+            (field.name == cell && role_field(field)) || role_column(field, &cell).is_some()
+        }) else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        let mode = if values[0].trim().is_empty() { "default" } else { "set" };
+        if role_field(field) && mode == "default" {
+            input.remove(&cell);
+        } else if mode == "default" {
+            let Some((row, column)) = role_column(field, &cell) else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+            };
+            let value = default_role_cell_text(
+                &data.effective["modules"][&module]["config"],
+                field,
+                row,
+                &column.name,
+            )
+            .unwrap_or_else(|| values[0].clone());
+            input.insert(cell.clone(), value);
+        } else {
+            input.insert(cell.clone(), values[0].clone());
+        }
+        input.insert(format!("role-mode:{cell}"), mode.to_owned());
+        role_modes.insert(cell, mode.to_owned());
     }
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
@@ -325,10 +632,21 @@ pub(super) async fn save_part(
                     Ok(value) => {
                         let config = &data.stored["modules"][&module]["config"];
                         let effective = &data.effective["modules"][&module]["config"];
-                        if form::should_write(
-                            &value,
-                            form::lookup(config, &field.name),
-                            form::lookup(effective, &field.name).or(Some(&empty)),
+                        let stored = form::lookup(config, &field.name)
+                            .filter(|value| !value.is_null());
+                        let baseline =
+                            form::lookup(effective, &field.name).or(Some(&empty));
+                        let compared = if stored.is_none() {
+                            role_defaults_for_compare(field, &value, baseline, &role_modes, &input)
+                        } else {
+                            value.clone()
+                        };
+                        if should_write_role_field(
+                            field,
+                            &compared,
+                            stored,
+                            baseline,
+                            &role_modes,
                         ) {
                             changes.insert(field.name.clone(), value);
                         }
@@ -359,9 +677,11 @@ pub(super) async fn save_part(
             errors.insert(field.name.clone(), vec![l.text(keys::FIELD_INVALID)]);
             continue;
         };
-        let stored = data.stored["modules"][&module]["config"].get(&field.name);
+        let stored = data.stored["modules"][&module]["config"]
+            .get(&field.name)
+            .filter(|value| !value.is_null());
         let effective = data.effective["modules"][&module]["config"].get(&field.name);
-        if form::should_write(&value, stored, effective) {
+        if should_write_role_field(field, &value, stored, effective, &role_modes) {
             changes.insert(field.name.clone(), value);
         }
     }
@@ -381,6 +701,14 @@ pub(super) async fn save_part(
     }
     if !changes.is_empty() && form::update(&mut data.stored, &module, &changes).is_err() {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
+    }
+    if let Some(config) = data
+        .stored
+        .get_mut("modules")
+        .and_then(|modules| modules.get_mut(&module))
+        .and_then(|module| module.get_mut("config"))
+    {
+        unset_default_role_overrides(config, &fields, &role_modes);
     }
     match app
         .api
@@ -426,5 +754,203 @@ pub(super) async fn save_part(
             )
         }
         Err(e) => api_error(&e, l, &headers),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn role_list(max_items: Option<u64>) -> form::Field {
+        let mut schema = serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "category": {"type": "string"},
+                    "staff_roles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "x-ui": {"widget": "roles"}
+                    }
+                }
+            }
+        });
+        if let Some(max_items) = max_items {
+            schema["maxItems"] = serde_json::json!(max_items);
+        }
+        let module = serde_json::json!({
+            "properties": {
+                "config": {"properties": {"panels": schema}}
+            }
+        });
+        form::fields(&module).remove(0)
+    }
+
+    #[test]
+    fn role_inputs_match_only_the_configured_role_field_and_existing_row_range() {
+        let field = role_list(Some(2));
+
+        assert!(role_column(&field, "panels.0.staff_roles").is_some());
+        assert!(role_column(&field, "panels.0.category").is_none());
+        assert!(role_column(&field, "panels.0.staff_roles.other").is_none());
+        assert!(role_row_allowed(&field, 0, 1));
+        assert!(role_row_allowed(&field, 1, 1));
+        assert!(!role_row_allowed(&field, 2, 2));
+        assert!(!role_row_allowed(&field, 999, 1));
+
+        let unbounded = role_list(None);
+        assert!(role_row_allowed(&unbounded, 2, 2));
+        assert!(!role_row_allowed(&unbounded, 999, 2));
+    }
+
+    #[test]
+    fn an_unset_role_cell_compares_as_its_effective_value() {
+        let field = role_list(None);
+        let baseline = serde_json::json!([{
+            "id": "panel",
+            "staff_roles": ["13", "99"]
+        }]);
+        let submitted = serde_json::json!([{"id": "panel"}]);
+        let modes = HashMap::from([(
+            "panels.0.staff_roles".to_owned(),
+            "default".to_owned(),
+        )]);
+        let input = HashMap::from([(
+            "panels.0.staff_roles".to_owned(),
+            String::new(),
+        )]);
+
+        let compared = role_defaults_for_compare(
+            &field,
+            &submitted,
+            Some(&baseline),
+            &modes,
+            &input,
+        );
+        assert_eq!(compared, baseline);
+        assert!(!should_write_role_field(
+            &field,
+            &compared,
+            None,
+            Some(&baseline),
+            &modes,
+        ));
+    }
+
+    #[test]
+    fn explicit_empty_roles_are_written_even_when_the_effective_value_is_empty() {
+        let field = role_list(None);
+        let empty = serde_json::json!([{"id": "panel", "staff_roles": []}]);
+        let modes = HashMap::from([(
+            "panels.0.staff_roles".to_owned(),
+            "set".to_owned(),
+        )]);
+
+        assert!(should_write_role_field(
+            &field,
+            &empty,
+            None,
+            Some(&empty),
+            &modes,
+        ));
+    }
+
+    #[test]
+    fn removing_a_row_never_reuses_the_next_rows_default_roles() {
+        let field = role_list(None);
+        let baseline = serde_json::json!([
+            {"id": "first", "staff_roles": ["13"]},
+            {"id": "second", "staff_roles": ["99"]}
+        ]);
+        let submitted = serde_json::json!([{"id": "second"}]);
+        let modes = HashMap::from([(
+            "panels.1.staff_roles".to_owned(),
+            "default".to_owned(),
+        )]);
+        let input = HashMap::from([("panels.0.x".to_owned(), "1".to_owned())]);
+
+        assert_eq!(
+            role_defaults_for_compare(
+                &field,
+                &submitted,
+                Some(&baseline),
+                &modes,
+                &input,
+            ),
+            submitted
+        );
+    }
+
+    #[test]
+    fn root_role_widgets_use_the_same_schema_limited_mode() {
+        let module = serde_json::json!({
+            "properties": {
+                "config": {"properties": {
+                    "staff_roles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "x-ui": {"widget": "roles"}
+                    }
+                }}
+            }
+        });
+        let field = form::fields(&module).remove(0);
+        let modes = HashMap::from([("staff_roles".to_owned(), "set".to_owned())]);
+
+        assert!(role_field(&field));
+        assert!(role_mode_sets(&field, &modes));
+        assert!(role_input_value("staff_roles", &field.schema, "set", vec!["13".into(), "99".into()])
+            .is_some_and(|value| value == "13,99"));
+    }
+
+    #[test]
+    fn deleting_an_earlier_row_keeps_default_roles_at_the_original_index() {
+        let field = role_list(None);
+        let effective = serde_json::json!({
+            "panels": [
+                {"id": "first", "staff_roles": ["13"]},
+                {"id": "second", "staff_roles": ["99"]}
+            ]
+        });
+        let roles = default_role_cell_text(&effective, &field, 1, "staff_roles").unwrap();
+        let input = HashMap::from([
+            ("panels.0.x".to_owned(), "1".to_owned()),
+            ("panels.1.id".to_owned(), "second".to_owned()),
+            ("panels.1.staff_roles".to_owned(), roles),
+        ]);
+        let form::Kind::List(columns) = &field.kind else {
+            panic!("test schema must be a list");
+        };
+
+        assert_eq!(
+            form::rows(&field, columns, &input),
+            Some(serde_json::json!([{"id": "second", "staff_roles": ["99"]}]))
+        );
+    }
+
+    #[test]
+    fn defaulting_a_root_role_field_removes_the_saved_override() {
+        let module = serde_json::json!({
+            "properties": {
+                "config": {"properties": {
+                    "staff_roles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "x-ui": {"widget": "roles"}
+                    }
+                }}
+            }
+        });
+        let field = form::fields(&module).remove(0);
+        let mut config = serde_json::json!({"staff_roles": ["13"], "other": ["99"]});
+        let modes = HashMap::from([("staff_roles".to_owned(), "default".to_owned())]);
+
+        assert!(role_field(&field));
+        unset_default_role_overrides(&mut config, &[field], &modes);
+
+        assert_eq!(config, serde_json::json!({"other": ["99"]}));
     }
 }

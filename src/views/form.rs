@@ -6,7 +6,7 @@ use crate::{
 };
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
-use std::{collections::HashMap, fmt::Write};
+use std::{collections::{HashMap, HashSet}, fmt::Write};
 
 pub(crate) struct FormPage<'a> {
     pub id: &'a str,
@@ -325,6 +325,201 @@ fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
     })
 }
 
+fn role_value_text(value: Option<&Value>) -> String {
+    if value
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.is_empty())
+    {
+        "-".into()
+    } else {
+        cell_text(value)
+    }
+}
+
+fn role_ids(value: &str) -> Vec<&str> {
+    if value.trim() == "-" {
+        return Vec::new();
+    }
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+fn role_ids_are_unique(value: &str) -> bool {
+    let mut seen = HashSet::new();
+    role_ids(value).into_iter().all(|id| seen.insert(id))
+}
+
+fn roles_controls(
+    l: Locale<'_>,
+    field: &Field,
+    control_index: &str,
+    mode_name: &str,
+    mode: &str,
+    required: bool,
+    value: &str,
+    directory: Option<&Value>,
+    picker: bool,
+) -> String {
+    let id = format!("field-{control_index}");
+    let default_id = format!("{id}-default");
+    let set_id = format!("{id}-set");
+    let name = escape(&format!("f.{}", field.name));
+    let mode_name = escape(mode_name);
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        "<div id=\"{id}-modes\" class=\"role-mode\" role=\"radiogroup\" aria-label=\"{}\">",
+        l.text(keys::COL_STAFF_ROLES_MODE)
+    );
+    if !required {
+        let _ = write!(
+            out,
+            "<label><input type=\"radio\" id=\"{default_id}\" name=\"{mode_name}\" value=\"default\"{}>{}</label>",
+            if mode == "default" { " checked" } else { "" },
+            l.text(keys::COL_STAFF_ROLES_DEFAULT)
+        );
+    }
+    let _ = write!(
+        out,
+        "<label><input type=\"radio\" id=\"{set_id}\" name=\"{mode_name}\" value=\"set\"{}>{}</label></div>",
+        if mode == "set" { " checked" } else { "" },
+        l.text(keys::COL_STAFF_ROLES_SET)
+    );
+    if picker {
+        if let Some(roles) = directory.and_then(|directory| directory["roles"].as_array()) {
+            let options_id = format!("{id}-options");
+            let values = role_ids(value);
+            let _ = write!(
+                out,
+                "<span id=\"{options_id}\" class=\"sr-only\">{}</span><div class=\"role-list\" role=\"group\" aria-labelledby=\"{options_id}\">",
+                l.text(keys::COL_STAFF_ROLES_SELECT)
+            );
+            let mut seen = HashSet::new();
+            for (index, role_id) in values.iter().enumerate() {
+                let item = roles.iter().find(|role| {
+                    role["id"].as_str() == Some(*role_id)
+                        && role["managed"] != true
+                        && role["name"] != "@everyone"
+                });
+                let label = item
+                    .and_then(|role| role["name"].as_str())
+                    .map_or_else(
+                        || l.with_text(keys::UNKNOWN_ROLE, "id", role_id),
+                        |name| escape(name),
+                    );
+                seen.insert((*role_id).to_owned());
+                let _ = write!(
+                    out,
+                    "<label class=\"role-option\"><input type=\"checkbox\" id=\"{id}-role-{index}\" name=\"{name}\" value=\"{}\" checked>{label}</label>",
+                    escape(role_id)
+                );
+            }
+            let mut available = HashSet::new();
+            for role in roles {
+                let Some(role_id) = role["id"].as_str() else {
+                    continue;
+                };
+                if role["managed"] == true
+                    || role["name"] == "@everyone"
+                    || seen.contains(role_id)
+                    || !available.insert(role_id)
+                {
+                    continue;
+                }
+                let label = escape(role["name"].as_str().unwrap_or(role_id));
+                let index = available.len() + values.len() - 1;
+                let _ = write!(
+                    out,
+                    "<label class=\"role-option\"><input type=\"checkbox\" id=\"{id}-role-{index}\" name=\"{name}\" value=\"{}\">{label}</label>",
+                    escape(role_id)
+                );
+            }
+            out.push_str("</div>");
+            return out;
+        }
+    }
+    let _ = write!(
+        out,
+        "<label for=\"{id}\">{}</label>{}",
+        l.text(keys::COL_STAFF_ROLES),
+        control(l, field, control_index, value, None, false)
+    );
+    out
+}
+
+fn roles_cell(
+    l: Locale<'_>,
+    field: &Field,
+    control_index: &str,
+    mode_name: &str,
+    mode: &str,
+    required: bool,
+    value: &str,
+    directory: Option<&Value>,
+    picker: bool,
+) -> String {
+    let id = format!("field-{control_index}");
+    let caption_id = format!("{id}-caption");
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        "<div class=\"list-cell list-roles\" role=\"group\" aria-labelledby=\"{caption_id}\"><span id=\"{caption_id}\" class=\"list-caption\">{}</span>",
+        l.text(keys::COL_STAFF_ROLES_PICKER)
+    );
+    out.push_str(&roles_controls(
+        l,
+        field,
+        control_index,
+        mode_name,
+        mode,
+        required,
+        value,
+        directory,
+        picker,
+    ));
+    out.push_str("</div>");
+    out
+}
+
+fn roles_field_widget(
+    l: Locale<'_>,
+    field: &Field,
+    control_index: &str,
+    mode_name: &str,
+    mode: &str,
+    value: &str,
+    directory: Option<&Value>,
+    picker: bool,
+    labelled_by: &str,
+    invalid: bool,
+) -> String {
+    let described = if invalid {
+        format!(" aria-describedby=\"field-{control_index}-error\"")
+    } else {
+        String::new()
+    };
+    let mut out = format!(
+        "<div class=\"role-list-control\" role=\"group\" aria-labelledby=\"{}\"{described}>",
+        escape(labelled_by)
+    );
+    out.push_str(&roles_controls(
+        l,
+        field,
+        control_index,
+        mode_name,
+        mode,
+        false,
+        value,
+        directory,
+        picker,
+    ));
+    out.push_str("</div>");
+    out
+}
+
 /// One row per named entry, and one empty row to add the next. After a refused save the rows come
 /// back as they were typed.
 fn entries_editor(
@@ -437,6 +632,7 @@ fn list_editor(
     columns: &[Column],
     index: usize,
     current: &Value,
+    stored: Option<&Value>,
     input: &HashMap<String, String>,
     directory: Option<&Value>,
 ) -> String {
@@ -449,59 +645,65 @@ fn list_editor(
         .collect();
     numbers.sort_unstable();
     numbers.dedup();
-    // (the text of each column, whether the row is ticked for removal)
-    let mut rows: Vec<(Vec<String>, bool)> = if numbers.is_empty() {
+    // Keep submitted row numbers stable when the form is shown again after an error.
+    let current_len = current.as_array().map_or(0, Vec::len);
+    let has_input = !numbers.is_empty();
+    let mut rows: Vec<(usize, Vec<String>, bool)> = if has_input {
+        numbers
+            .iter()
+            .map(|&number| {
+                let texts = columns
+                    .iter()
+                    .map(|column| cell(number, column).cloned().unwrap_or_default())
+                    .collect();
+                let removed = input
+                    .get(&format!("{prefix}{number}.x"))
+                    .is_some_and(|value| value == "1");
+                (number, texts, removed)
+            })
+            .collect()
+    } else {
         current
             .as_array()
             .into_iter()
             .flatten()
-            .map(|row| {
+            .enumerate()
+            .map(|(number, row)| {
                 let texts = columns
                     .iter()
-                    .map(|c| cell_text(row.get(&c.name)))
+                    .map(|column| {
+                        let value = row.get(&column.name);
+                        if column.kind == Kind::Roles {
+                            role_value_text(value)
+                        } else {
+                            cell_text(value)
+                        }
+                    })
                     .collect();
-                (texts, false)
-            })
-            .collect()
-    } else {
-        numbers
-            .iter()
-            .map(|&n| {
-                let texts = columns
-                    .iter()
-                    .map(|c| cell(n, c).cloned().unwrap_or_default())
-                    .collect();
-                let removed = input
-                    .get(&format!("{prefix}{n}.x"))
-                    .is_some_and(|v| v == "1");
-                (texts, removed)
+                (number, texts, false)
             })
             .collect()
     };
-    rows.retain(|(texts, removed)| {
-        *removed
-            || columns
-                .iter()
-                .zip(texts)
-                .any(|(c, text)| !form::is_preset(&c.kind) && !text.is_empty())
-    });
-    let existing = rows.len();
-    if field.schema["maxItems"]
+    let has_new_row = rows.iter().any(|(number, _, _)| *number == current_len);
+    let can_add = field.schema["maxItems"]
         .as_u64()
-        .is_none_or(|max| (rows.len() as u64) < max)
-    {
+        .is_none_or(|max| (current_len as u64) < max);
+    if can_add && !has_new_row {
         let blank = columns
             .iter()
-            .map(|c| match &c.kind {
-                Kind::Boolean => c.schema["default"].as_bool().unwrap_or(false).to_string(),
+            .map(|column| match &column.kind {
+                Kind::Boolean => column.schema["default"]
+                    .as_bool()
+                    .unwrap_or(false)
+                    .to_string(),
                 Kind::Enum(values) => values.first().cloned().unwrap_or_default(),
                 _ => String::new(),
             })
             .collect();
-        rows.push((blank, false));
+        rows.push((current_len, blank, false));
     }
     let mut out = String::from("<div class=\"list-editor\">");
-    for (row, (texts, removed)) in rows.iter().enumerate() {
+    for (row, texts, removed) in &rows {
         out.push_str("<div class=\"list-row\">");
         for (c, (column, text)) in columns.iter().zip(texts).enumerate() {
             let mut schema = column.schema.clone();
@@ -514,21 +716,70 @@ fn list_editor(
                 kind: column.kind.clone(),
                 schema,
             };
-            let _ = write!(
-                out,
-                "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
-                column_title(l, &column.name, field.name == "panels"),
-                control(
+            if column.kind == Kind::Roles && column.schema["x-ui"]["widget"] == "roles" {
+                let current_cell = current
+                    .as_array()
+                    .and_then(|rows| rows.get(*row))
+                    .and_then(|current| current.get(&column.name));
+                let stored_cell = stored
+                    .and_then(Value::as_array)
+                    .and_then(|rows| rows.get(*row))
+                    .and_then(|stored| stored.get(&column.name))
+                    .filter(|value| !value.is_null());
+                let mode_name = format!("role_mode:{}", cell.name);
+                let mode_key = format!("role-mode:{}", cell.name);
+                let mode = input
+                    .get(&mode_key)
+                    .map_or(
+                        if column.required || stored_cell.is_some() {
+                            "set"
+                        } else {
+                            "default"
+                        },
+                        String::as_str,
+                    );
+                let text = if mode == "default" {
+                    role_value_text(current_cell)
+                } else {
+                    input
+                        .get(&cell.name)
+                        .cloned()
+                        .unwrap_or_else(|| role_value_text(current_cell))
+                };
+                let picker = form::roles_picker(&column.kind, &column.schema, current_cell, directory)
+                    && role_ids_are_unique(&text);
+                out.push_str(&roles_cell(
                     l,
                     &cell,
-                    format!("list-{index}-{row}-{c}"),
-                    text,
+                    &format!("list-{index}-{row}-{c}"),
+                    &mode_name,
+                    mode,
+                    column.required,
+                    &text,
                     directory,
-                    false
-                )
-            );
+                    picker,
+                ));
+            } else {
+                let _ = write!(
+                    out,
+                    "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
+                    column_title(l, &column.name, field.name == "panels"),
+                    control(
+                        l,
+                        &cell,
+                        format!("list-{index}-{row}-{c}"),
+                        text,
+                        directory,
+                        false
+                    )
+                );
+            }
         }
-        if row < existing {
+        let has_content = columns
+            .iter()
+            .zip(texts)
+            .any(|(column, text)| !form::is_preset(&column.kind) && !text.is_empty());
+        if *row < current_len || *removed || has_content {
             let _ = write!(
                 out,
                 "<label class=\"list-cell list-remove\"><span class=\"list-caption\">{}</span><input type=\"checkbox\" name=\"{}\" value=\"1\"{}></label>",
@@ -634,8 +885,10 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         }
         for &index in members {
             let field = &fields[index];
-            let current = form::lookup(&stored["modules"][module]["config"], &field.name)
-                .filter(|v| !v.is_null())
+            let stored_current =
+                form::lookup(&stored["modules"][module]["config"], &field.name)
+                    .filter(|v| !v.is_null());
+            let current = stored_current
                 .or_else(|| form::lookup(&effective["modules"][module]["config"], &field.name))
                 .unwrap_or(&Value::Null);
             let fallback = match (&field.kind, current) {
@@ -666,11 +919,23 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
             } else {
                 ""
             };
+            let role_field =
+                field.kind == Kind::Roles && field.schema["x-ui"]["widget"] == "roles";
+            let description = escape(field.schema["description"].as_str().unwrap_or(&field.label));
+            let heading = if role_field {
+                format!(
+                    "<span id=\"field-{index}-label\" title=\"{description}\">{}</span>",
+                    l.text(keys::COL_STAFF_ROLES_PICKER)
+                )
+            } else {
+                format!(
+                    "<label for=\"field-{index}\" title=\"{description}\">{}</label>",
+                    field_label(l, field)
+                )
+            };
             let _ = write!(
                 body,
-                "<div class=\"settings-row{wide}{when}\"><div><label for=\"field-{index}\" title=\"{}\">{}</label>",
-                escape(field.schema["description"].as_str().unwrap_or(&field.label)),
-                field_label(l, field)
+                "<div class=\"settings-row{wide}{when}\"><div>{heading}"
             );
             if inherited {
                 let note = if matches!(field.kind, Kind::Words | Kind::Roles) {
@@ -690,13 +955,48 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 }
                 body.push_str("</div>");
             }
-            let widget = match &field.kind {
-                Kind::List(columns) => {
-                    list_editor(l, field, columns, index, current, input, directory)
+            let widget = if role_field {
+                let mode_name = format!("role_mode:{}", field.name);
+                let mode_key = format!("role-mode:{}", field.name);
+                let mode = input.get(&mode_key).map_or(
+                    if stored_current.is_some() { "set" } else { "default" },
+                    String::as_str,
+                );
+                let value = if mode == "default" {
+                    &fallback
+                } else {
+                    input.get(&field.name).unwrap_or(&fallback)
+                };
+                let picker = form::roles_picker(&field.kind, &field.schema, Some(current), directory)
+                    && role_ids_are_unique(value);
+                roles_field_widget(
+                    l,
+                    field,
+                    &index.to_string(),
+                    &mode_name,
+                    mode,
+                    value,
+                    directory,
+                    picker,
+                    &format!("field-{index}-label"),
+                    field_errors.is_some(),
+                )
+            } else {
+                match &field.kind {
+                    Kind::List(columns) => list_editor(
+                        l,
+                        field,
+                        columns,
+                        index,
+                        current,
+                        stored_current,
+                        input,
+                        directory,
+                    ),
+                    Kind::Entries => entries_editor(l, field, current, input),
+                    Kind::Message(_) => message_row(l, id, module, field, current),
+                    _ => control(l, field, index, value, directory, field_errors.is_some()),
                 }
-                Kind::Entries => entries_editor(l, field, current, input),
-                Kind::Message(_) => message_row(l, id, module, field, current),
-                _ => control(l, field, index, value, directory, field_errors.is_some()),
             };
             let _ = write!(
                 body,
@@ -764,6 +1064,35 @@ mod tests {
                 .map(|index| json!({"id": format!("panel-{index}")}))
                 .collect(),
         )
+    }
+
+    fn role_panel_field() -> (crate::form::Field, Vec<crate::form::Column>) {
+        let module = json!({"properties": {"config": {"properties": {"panels": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {"type": "object", "required": ["id"], "properties": {
+                "id": {"type": "string"},
+                "category": {"type": "string", "maxLength": 4},
+                "staff_roles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-ui": {"widget": "roles"}
+                }
+            }}
+        }}}}});
+        let field = crate::form::fields(&module).remove(0);
+        let crate::form::Kind::List(columns) = &field.kind else {
+            panic!("not a list");
+        };
+        (field, columns.clone())
+    }
+
+    fn role_directory() -> serde_json::Value {
+        json!({"roles": [
+            {"id": "13", "name": "Support", "managed": false},
+            {"id": "42", "name": "@everyone", "managed": false},
+            {"id": "14", "name": "managed", "managed": true}
+        ]})
     }
 
     #[test]
@@ -859,6 +1188,7 @@ mod tests {
                 columns,
                 0,
                 &current,
+                None,
                 &input,
                 None,
             );
@@ -879,6 +1209,7 @@ mod tests {
             std::slice::from_ref(id),
             0,
             &current,
+            None,
             &input,
             None,
         );
@@ -895,6 +1226,7 @@ mod tests {
             std::slice::from_ref(&unknown),
             0,
             &current,
+            None,
             &input,
             None,
         );
@@ -902,6 +1234,143 @@ mod tests {
             escaped.contains("<span class=\"list-caption\">&lt;unknown&gt;</span>"),
             "{escaped}"
         );
+    }
+
+    #[test]
+    fn a_panel_role_group_keeps_unknown_ids_and_has_an_accessible_name() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = role_panel_field();
+        let current = json!([{"id": "support", "category": "help", "staff_roles": ["13", "99"]}]);
+        let input = HashMap::new();
+        let directory = role_directory();
+
+        let english = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &current,
+            Some(&current),
+            &input,
+            Some(&directory),
+        );
+        assert!(english.contains("class=\"list-roles\" role=\"group\" aria-labelledby="));
+        assert!(english.contains("role=\"radiogroup\""));
+        assert!(english.contains("<span class=\"list-caption\">Staff roles</span>"));
+        assert!(english.contains("name=\"role_mode:panels.0.staff_roles\" value=\"set\" checked"));
+        assert!(english.contains("name=\"f.panels.0.staff_roles\" value=\"13\" checked"));
+        assert!(english.contains("value=\"99\" checked>Unknown role 99"));
+
+        let japanese = list_editor(
+            catalogs.locale("ja"),
+            &field,
+            &columns,
+            0,
+            &current,
+            Some(&current),
+            &input,
+            Some(&directory),
+        );
+        assert!(japanese.contains("<span class=\"list-caption\">スタッフロール</span>"));
+        assert!(japanese.contains("不明なロール 99"));
+    }
+
+    #[test]
+    fn a_role_cell_preserves_unset_empty_duplicates_and_directory_fallback() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = role_panel_field();
+        let input = HashMap::new();
+        let directory = role_directory();
+        let inherited = json!([{"id": "support", "category": "help", "staff_roles": ["13"]}]);
+
+        let inherited_html = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &inherited,
+            None,
+            &input,
+            Some(&directory),
+        );
+        assert!(inherited_html.contains("value=\"default\" checked"));
+        assert!(inherited_html.contains("name=\"f.panels.0.staff_roles\" value=\"13\" checked"));
+
+        let empty = json!([{"id": "support", "category": "help", "staff_roles": []}]);
+        let empty_html = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &empty,
+            Some(&empty),
+            &input,
+            Some(&directory),
+        );
+        assert!(empty_html.contains("value=\"set\" checked"));
+        assert!(!empty_html.contains("name=\"f.panels.0.staff_roles\" value=\"13\" checked"));
+
+        let duplicate = json!([{"id": "support", "category": "help", "staff_roles": ["13", "13"]}]);
+        let duplicate_html = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &duplicate,
+            Some(&duplicate),
+            &input,
+            Some(&directory),
+        );
+        assert!(duplicate_html.contains("name=\"f.panels.0.staff_roles\" value=\"13, 13\""));
+        assert!(duplicate_html.contains("Staff role IDs (comma separated)"));
+        assert!(!duplicate_html.contains("role-option"));
+
+        let missing_directory = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &inherited,
+            Some(&inherited),
+            &input,
+            None,
+        );
+        assert!(missing_directory.contains("name=\"f.panels.0.staff_roles\" value=\"13\""));
+        assert!(!missing_directory.contains("role-option"));
+    }
+
+    #[test]
+    fn list_rows_keep_their_names_after_removal_and_a_cell_error() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = role_panel_field();
+        let current = json!([{"id": "old", "category": "help", "staff_roles": ["13"]}]);
+        let stored = Some(&current);
+        let input = HashMap::from([
+            ("panels.0.x".into(), "1".into()),
+            ("panels.0.id".into(), "old".into()),
+            ("panels.0.category".into(), "help".into()),
+            ("panels.0.staff_roles".into(), "13".into()),
+            ("panels.1.id".into(), "new".into()),
+            ("panels.1.category".into(), "toolong".into()),
+            ("panels.1.staff_roles".into(), "13,99".into()),
+            ("role-mode:panels.0.staff_roles".into(), "set".into()),
+            ("role-mode:panels.1.staff_roles".into(), "set".into()),
+        ]);
+        let html = list_editor(
+            catalogs.locale("en"),
+            &field,
+            &columns,
+            0,
+            &current,
+            stored,
+            &input,
+            Some(&role_directory()),
+        );
+
+        assert!(html.contains("name=\"role_mode:panels.1.staff_roles\" value=\"set\" checked"));
+        assert!(html.contains("name=\"f.panels.1.staff_roles\" value=\"99\" checked"));
+        assert!(html.contains("name=\"f.panels.1.category\""));
+        assert!(html.contains("name=\"f.panels.1.x\""));
     }
 
     #[test]
@@ -918,6 +1387,7 @@ mod tests {
                 &columns,
                 0,
                 &current,
+                None,
                 &input,
                 None,
             );
@@ -940,6 +1410,7 @@ mod tests {
             &columns,
             0,
             &current,
+            None,
             &input,
             None,
         );
@@ -960,6 +1431,7 @@ mod tests {
             &columns,
             0,
             &current,
+            None,
             &input,
             None,
         );
@@ -972,6 +1444,7 @@ mod tests {
             &columns,
             1,
             &adjacent_current,
+            None,
             &input,
             None,
         );
