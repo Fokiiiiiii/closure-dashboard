@@ -113,6 +113,11 @@ form:not(:has(input[name="f.voice_mute_method"][value="role"]:checked)) .when[da
 .list-cell { display:grid; gap:4px; flex:1 1 150px; min-inline-size:0; justify-items:start; }
 .list-cell select, .list-cell input:not(.switch):not([type=checkbox]) { inline-size:100%; }
 .list-caption { font-size:12px; color:var(--muted); }
+.time-minute-control { display:flex; flex-wrap:wrap; align-items:center; gap:8px; inline-size:100%; min-inline-size:0; }
+.list-cell .time-minute-control input[data-minute-input] { flex:1 1 8rem; inline-size:auto; min-inline-size:0; }
+.time-minute-end { display:inline-flex; align-items:center; gap:6px; }
+.time-minute-end input[type=checkbox] { flex:none; inline-size:18px; block-size:18px; margin:0; }
+.time-minute-end label { color:var(--muted); font-size:.85rem; white-space:nowrap; }
 .head-actions { display:flex; align-items:center; gap:12px; }
 .sr-only { position:absolute; inline-size:1px; block-size:1px; overflow:hidden; clip:rect(0 0 0 0); }
 .ed-form { display:grid; gap:16px; }
@@ -229,6 +234,7 @@ th,td { padding:9px 16px; border-block-end:1px solid var(--line); text-align:sta
 th { color:var(--muted); font-size:12px; font-weight:500; white-space:nowrap; }
 td { overflow-wrap:anywhere; }
 .mono { color:var(--muted); font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.ticket-transcript { margin:0; padding:16px; overflow:auto; max-block-size:65vh; white-space:pre-wrap; overflow-wrap:anywhere; }
 .reason { max-inline-size:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pill { background:var(--field); color:var(--muted); white-space:nowrap; }
 .permission-panel,.assignment-cards { max-inline-size:760px; }

@@ -459,3 +459,140 @@ async fn a_note_is_recorded_and_the_csv_is_downloaded() {
     let body = to_bytes(csv.into_body(), 1 << 20).await.unwrap();
     assert!(String::from_utf8_lossy(&body).starts_with("number,created_at"));
 }
+
+#[tokio::test]
+async fn ticket_lists_and_details_use_actor_checked_api_data() {
+    let (config, state) = setup().await;
+    let app = router(config.clone());
+    let open = app
+        .clone()
+        .oneshot(request(&config, Method::GET, "/g/42/tickets", ""))
+        .await
+        .unwrap();
+    assert_eq!(open.status(), StatusCode::OK);
+    let page = String::from_utf8(
+        to_bytes(open.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    assert!(page.contains("#3"));
+    assert!(page.contains("state=closed"));
+    assert!(page.contains("before=555000000000000003"));
+
+    let closed = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets?state=closed&before=4",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(closed.status(), StatusCode::OK);
+    let page = String::from_utf8(
+        to_bytes(closed.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    assert!(page.contains("#4"));
+    assert!(page.contains("state=closed&amp;before=4"));
+
+    let detail = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/555000000000000003?state=open",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
+    let page = String::from_utf8(
+        to_bytes(detail.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    assert!(page.contains("&lt;script&gt;message&lt;/script&gt;"));
+    assert!(!page.contains("<script>message</script>"));
+    assert!(page.contains("start=4"));
+
+    let invalid = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/555000000000000003?state=open&start=4294967296",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let next = app
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/555000000000000003?state=open&start=4",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next.status(), StatusCode::OK);
+
+    let state = state.lock().unwrap();
+    assert!(
+        state
+            .queries
+            .iter()
+            .any(|query| query == "/v1/guilds/42/tickets?state=open&limit=50")
+    );
+    assert!(
+        state
+            .queries
+            .iter()
+            .any(|query| query == "/v1/guilds/42/tickets?state=closed&limit=50&before=4")
+    );
+    assert!(
+        state
+            .queries
+            .iter()
+            .any(|query| query == "/v1/guilds/42/tickets/555000000000000003?start=4&limit=4")
+    );
+    assert!(
+        !state
+            .queries
+            .iter()
+            .any(|query| query.contains("start=4294967296"))
+    );
+    assert!(
+        state.calls.iter().any(|call| {
+            call.0 == "/v1/guilds/42/tickets" && call.3 == "123"
+        }),
+        "the actor is sent to the ticket API"
+    );
+}
+
+#[tokio::test]
+async fn ticket_views_reach_the_api_acl_and_keep_guild_scope() {
+    let (config, state) = setup().await;
+    {
+        let mut fake = state.lock().unwrap();
+        fake.viewer = true;
+        fake.ticket_forbidden = true;
+    }
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/43/tickets",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(
+        state.lock().unwrap().calls.iter().any(|call| {
+            call.0 == "/v1/guilds/43/tickets" && call.3 == "123"
+        }),
+        "the selected guild and actor reach the ticket API authorization check"
+    );
+}

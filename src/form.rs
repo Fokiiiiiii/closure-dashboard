@@ -1,6 +1,9 @@
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
+const TEXT_LIST_LIMIT: usize = 5;
+pub const FORM_QUESTIONS_LIMIT: usize = 5;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Boolean,
@@ -10,6 +13,10 @@ pub enum Kind {
     Roles,
     /// Texts told apart by commas, such as the emojis of a rule.
     Words,
+    /// An ordered array of independent strings, edited one item at a time.
+    TextList,
+    /// Form questions stored as legacy strings or tagged objects, preserving their JSON structure.
+    FormQuestions,
     /// `false`, `true`, or role ids told apart by commas.
     FlagOrRoles,
     /// A message with embeds, edited in the composer; the variables its texts may use.
@@ -281,6 +288,16 @@ pub fn modules(schema: &Value) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+fn is_form_questions_schema(schema: &Value) -> bool {
+    let Some(variants) = schema["items"]["oneOf"].as_array() else {
+        return false;
+    };
+    variants.iter().any(|variant| variant["type"] == "string")
+        && variants.iter().any(|variant| {
+            variant["type"] == "object" && variant["properties"]["type"]["type"] == "string"
+        })
+}
+
 /// The columns of a list: the required ones first, then the rest; `None` when one is of a kind the form cannot show.
 fn columns(items: &Value) -> Option<Vec<Column>> {
     let properties = items["properties"].as_object()?;
@@ -326,6 +343,13 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
                         && schema["x-ui"]["widget"] == "roles" =>
                 {
                     Kind::Roles
+                }
+                "array" if is_form_questions_schema(&schema) => Kind::FormQuestions,
+                "array"
+                    if schema["items"]["type"] == "string"
+                        && schema["x-ui"]["widget"] == "text-list" =>
+                {
+                    Kind::TextList
                 }
                 "array" if schema["items"]["type"] == "string" => Kind::Words,
                 _ => return None,
@@ -448,10 +472,14 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         } else {
             Kind::String
         }
+    } else if is_form_questions_schema(&schema) {
+        Kind::FormQuestions
     } else if ty == "array" && schema["items"]["type"] == "object" {
         Kind::List(columns(&schema["items"])?)
     } else if ty == "array" && schema["items"]["type"] == "string" && widget == Some("roles") {
         Kind::Roles
+    } else if ty == "array" && schema["items"]["type"] == "string" && widget == Some("text-list") {
+        Kind::TextList
     } else if ty == "array" && schema["items"]["type"] == "string" {
         // Ids and texts, told apart by commas: a setting is not dropped from the form for being a
         // list of strings.
@@ -585,6 +613,43 @@ fn parse_roles(field: &Field, input: &str) -> Option<Value> {
     Some(json!(values))
 }
 
+fn parse_time_minute(field: &Field, input: &str) -> Option<Value> {
+    let minimum = field.schema["minimum"]
+        .as_i64()
+        .or_else(|| field.schema["x-ui"]["min"].as_i64())
+        .unwrap_or(0);
+    let maximum = field.schema["maximum"]
+        .as_i64()
+        .or_else(|| field.schema["x-ui"]["max"].as_i64())
+        .unwrap_or(i64::MAX);
+    let minutes = if matches!(input, "24:00" | "24:00:00") && maximum == 1440 {
+        1440
+    } else {
+        let mut parts = input.split(':');
+        let hour = parts.next()?;
+        let minute = parts.next()?;
+        let seconds = parts.next();
+        if parts.next().is_some()
+            || seconds.is_some_and(|seconds| seconds != "00" || seconds.len() != 2)
+            || hour.len() != 2
+            || minute.len() != 2
+            || !hour.bytes().all(|digit| digit.is_ascii_digit())
+            || !minute.bytes().all(|digit| digit.is_ascii_digit())
+        {
+            return None;
+        }
+        let hour = hour.parse::<i64>().ok()?;
+        let minute = minute.parse::<i64>().ok()?;
+        if hour > 23 || minute > 59 {
+            return None;
+        }
+        hour * 60 + minute
+    };
+    (minimum..=maximum)
+        .contains(&minutes)
+        .then(|| json!(minutes))
+}
+
 #[must_use]
 pub fn parse(field: &Field, input: &str) -> Option<Value> {
     if input.is_empty() {
@@ -596,13 +661,19 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             "false" => Some(json!(false)),
             _ => None,
         },
+        Kind::Integer if field.schema["x-ui"]["widget"] == "time-minute" => {
+            parse_time_minute(field, input)
+        }
         Kind::Integer => {
             let n: i64 = input.parse().ok()?;
             let min = field.schema["minimum"].as_i64().unwrap_or(i64::MIN);
             let max = field.schema["maximum"].as_i64().unwrap_or(i64::MAX);
             (min..=max).contains(&n).then(|| json!(n))
         }
-        Kind::List(_) | Kind::Entries | Kind::Structured | Kind::Message(_) => None,
+        Kind::FormQuestions => parse_form_questions(field, input),
+        Kind::List(_) | Kind::Entries | Kind::TextList | Kind::Structured | Kind::Message(_) => {
+            None
+        }
         Kind::FlagOrRoles => match input.trim() {
             "true" => Some(json!(true)),
             "false" => Some(json!(false)),
@@ -668,6 +739,57 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
     }
 }
 
+/// Parse a JSON array of legacy text questions and tagged question objects without flattening them.
+#[must_use]
+pub fn parse_form_questions(field: &Field, input: &str) -> Option<Value> {
+    let value: Value = serde_json::from_str(input).ok()?;
+    let questions = value.as_array()?;
+    let maximum = field.schema["maxItems"]
+        .as_u64()
+        .unwrap_or(FORM_QUESTIONS_LIMIT as u64)
+        .min(FORM_QUESTIONS_LIMIT as u64) as usize;
+    if questions.len() > maximum {
+        return None;
+    }
+
+    let variants = field.schema["items"]["oneOf"].as_array()?;
+    let legacy = variants
+        .iter()
+        .find(|variant| variant["type"] == "string")?;
+    let object = variants
+        .iter()
+        .find(|variant| variant["type"] == "object")?;
+    let object_properties = object["properties"].as_object()?;
+    let allowed_types = object_properties.get("type")?["enum"].as_array()?;
+    let minimum = legacy["minLength"].as_u64().unwrap_or(1) as usize;
+    let maximum_length = legacy["maxLength"].as_u64().unwrap_or(u64::MAX) as usize;
+
+    for question in questions {
+        match question {
+            Value::String(text) => {
+                let length = text.chars().count();
+                if !(minimum..=maximum_length).contains(&length) {
+                    return None;
+                }
+            }
+            Value::Object(properties) => {
+                let question_type = properties.get("type")?.as_str()?;
+                if !allowed_types
+                    .iter()
+                    .any(|value| value.as_str() == Some(question_type))
+                    || properties
+                        .keys()
+                        .any(|name| !object_properties.contains_key(name))
+                {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(value)
+}
+
 /// A kind whose cell always has a value to start with, so that it does not make a row worth keeping.
 #[must_use]
 pub fn is_preset(kind: &Kind) -> bool {
@@ -724,6 +846,93 @@ pub fn rows<S: std::hash::BuildHasher>(
     input: &HashMap<String, String, S>,
 ) -> Option<Value> {
     let prefix = format!("{}.", field.name);
+    if columns
+        .iter()
+        .any(|column| column.kind == Kind::TextList || column.kind == Kind::FormQuestions)
+    {
+        for key in input.keys().filter(|key| key.starts_with(&prefix)) {
+            let mut parts = key.strip_prefix(&prefix)?.split('.');
+            let _row = parts.next()?.parse::<usize>().ok()?;
+            match parts.next() {
+                Some("x")
+                    if parts.next().is_none()
+                        && input.get(key).is_some_and(|value| value == "1") => {}
+                Some(name) => {
+                    let column = columns.iter().find(|column| column.name == name)?;
+                    match &column.kind {
+                        Kind::TextList => {
+                            let _item = parts.next()?.parse::<usize>().ok()?;
+                            match parts.next() {
+                                None => {}
+                                Some("x")
+                                    if parts.next().is_none()
+                                        && input.get(key).is_some_and(|value| value == "1") => {}
+                                _ => return None,
+                            }
+                        }
+                        Kind::FormQuestions => {
+                            let Some(question_index) = parts.next() else {
+                                continue;
+                            };
+                            let question = question_index.parse::<usize>().ok()?;
+                            let maximum = column.schema["maxItems"]
+                                .as_u64()
+                                .unwrap_or(FORM_QUESTIONS_LIMIT as u64)
+                                .min(FORM_QUESTIONS_LIMIT as u64)
+                                as usize;
+                            if question >= maximum {
+                                return None;
+                            }
+                            match parts.next() {
+                                None => {}
+                                Some("x")
+                                    if parts.next().is_none()
+                                        && input.get(key).is_some_and(|value| value == "1") => {}
+                                Some(name) => {
+                                    let object = column.schema["items"]["oneOf"]
+                                        .as_array()?
+                                        .iter()
+                                        .find(|variant| variant["type"] == "object")?;
+                                    let question_properties = object["properties"].as_object()?;
+                                    let property = question_properties.get(name)?;
+                                    if name == "options" {
+                                        let Some(option_index) = parts.next() else {
+                                            continue;
+                                        };
+                                        let option = option_index.parse::<usize>().ok()?;
+                                        let maximum =
+                                            property["maxItems"].as_u64().unwrap_or(25).min(25)
+                                                as usize;
+                                        if option >= maximum {
+                                            return None;
+                                        }
+                                        match parts.next() {
+                                            Some("x")
+                                                if parts.next().is_none()
+                                                    && input
+                                                        .get(key)
+                                                        .is_some_and(|value| value == "1") => {}
+                                            Some(option_field)
+                                                if property["items"]["properties"]
+                                                    .get(option_field)
+                                                    .is_some()
+                                                    && parts.next().is_none() => {}
+                                            _ => return None,
+                                        }
+                                    } else if parts.next().is_some() {
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+                        _ if parts.next().is_none() => {}
+                        _ => return None,
+                    }
+                }
+                None => return None,
+            }
+        }
+    }
     let mut numbers: Vec<usize> = input
         .keys()
         .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
@@ -738,14 +947,40 @@ pub fn rows<S: std::hash::BuildHasher>(
         }
         let mut row = Map::new();
         for column in columns {
-            let raw = input.get(&key(&column.name)).map_or("", String::as_str);
+            let cell_name = key(&column.name);
+            let raw = input.get(&cell_name).map_or("", String::as_str);
             let cell = Field {
                 name: column.name.clone(),
                 label: column.name.clone(),
                 kind: column.kind.clone(),
                 schema: column.schema.clone(),
             };
-            match parse(&cell, raw) {
+            let end_of_day_key = key(&format!("{}.end-of-day", column.name));
+            let end_of_day = column.kind == Kind::Integer
+                && column.schema["x-ui"]["widget"] == "time-minute"
+                && column.schema["maximum"]
+                    .as_i64()
+                    .or_else(|| column.schema["x-ui"]["max"].as_i64())
+                    .is_some_and(|maximum| maximum == 1440)
+                && input.get(&end_of_day_key).is_some_and(|value| value == "1");
+            let parsed = if end_of_day {
+                parse(&cell, "24:00")
+            } else if column.kind == Kind::TextList {
+                let mut cell = cell.clone();
+                cell.name = cell_name;
+                text_list(&cell, input)
+            } else {
+                parse(&cell, raw)
+            };
+            match parsed {
+                Some(Value::Array(values))
+                    if (column.kind == Kind::TextList || column.kind == Kind::FormQuestions)
+                        && values.is_empty()
+                        && !column.required
+                        && row.values().all(Value::is_null) => {}
+                Some(Value::Null) if column.schema["x-ui"]["widget"] == "ticket-panel" => {
+                    row.insert(column.name.clone(), Value::Null);
+                }
                 Some(Value::Null) => {}
                 Some(value) => {
                     row.insert(column.name.clone(), value);
@@ -754,10 +989,9 @@ pub fn rows<S: std::hash::BuildHasher>(
                 None => return None,
             }
         }
-        if !columns
-            .iter()
-            .any(|c| !is_preset(&c.kind) && row.contains_key(&c.name))
-        {
+        if !columns.iter().any(|column| {
+            !is_preset(&column.kind) && row.get(&column.name).is_some_and(|value| !value.is_null())
+        }) {
             continue;
         }
         if columns
@@ -769,6 +1003,80 @@ pub fn rows<S: std::hash::BuildHasher>(
         rows.push(Value::Object(row));
     }
     Some(Value::Array(rows))
+}
+
+#[must_use]
+pub(crate) fn text_list_limit(field: &Field) -> usize {
+    field.schema["maxItems"]
+        .as_u64()
+        .and_then(|limit| usize::try_from(limit).ok())
+        .unwrap_or(TEXT_LIST_LIMIT)
+        .min(TEXT_LIST_LIMIT)
+}
+
+#[must_use]
+pub(crate) fn text_list_row_limit(field: &Field) -> usize {
+    text_list_limit(field).saturating_mul(2)
+}
+
+#[must_use]
+pub(crate) fn text_list<S: std::hash::BuildHasher>(
+    field: &Field,
+    input: &HashMap<String, String, S>,
+) -> Option<Value> {
+    if input.contains_key(&field.name) {
+        return None;
+    }
+    let prefix = format!("{}.", field.name);
+    let row_limit = text_list_row_limit(field);
+    let mut numbers = Vec::new();
+    for key in input.keys().filter(|key| key.starts_with(&prefix)) {
+        let mut parts = key.strip_prefix(&prefix)?.split('.');
+        let number = parts.next()?.parse::<usize>().ok()?;
+        if number >= row_limit {
+            return None;
+        }
+        match parts.next() {
+            None => {}
+            Some("x")
+                if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") => {}
+            _ => return None,
+        }
+        numbers.push(number);
+    }
+    numbers.sort_unstable();
+    numbers.dedup();
+    let item = Field {
+        name: field.name.clone(),
+        label: field.label.clone(),
+        kind: Kind::String,
+        schema: field.schema["items"].clone(),
+    };
+    let max = text_list_limit(field);
+    let mut values = Vec::new();
+    for number in numbers {
+        let key = format!("{prefix}{number}");
+        if input
+            .get(&format!("{key}.x"))
+            .is_some_and(|value| value == "1")
+        {
+            continue;
+        }
+        let raw = input.get(&key).map_or("", String::as_str);
+        if raw.is_empty() {
+            continue;
+        }
+        let Some(Value::String(value)) = parse(&item, raw) else {
+            return None;
+        };
+        values.push(value);
+        if values.len() > max {
+            return None;
+        }
+    }
+    Some(Value::Array(
+        values.into_iter().map(Value::String).collect(),
+    ))
 }
 
 #[must_use]
@@ -800,6 +1108,19 @@ pub fn settings_should_write(
     }
     let baseline = stored.filter(|v| !v.is_null()).or(effective);
     normalized(baseline.unwrap_or(&Value::Null)) != normalized(value)
+}
+
+#[must_use]
+pub(crate) fn text_list_should_write(
+    value: &Value,
+    stored: Option<&Value>,
+    effective: Option<&Value>,
+) -> bool {
+    let baseline = stored.filter(|value| !value.is_null()).or(effective);
+    let baseline = baseline.unwrap_or(&Value::Null);
+    let empty =
+        |value: &Value| value.is_null() || value.as_array().is_some_and(|items| items.is_empty());
+    !(empty(baseline) && empty(value)) && baseline != value
 }
 
 #[must_use]
@@ -1332,5 +1653,265 @@ mod tests {
         assert_eq!(parse(&field, "-"), Some(json!([])));
         assert_eq!(parse(&field, ""), Some(Value::Null));
         assert_eq!(parse(&field, "+5, 6"), Some(json!(["+5", "6"])));
+    }
+
+    #[test]
+    fn time_minute_fields_accept_local_times_and_exact_midnight() {
+        let field = |name: &str, maximum: i64| Field {
+            name: name.to_owned(),
+            label: name.to_owned(),
+            kind: Kind::Integer,
+            schema: json!({
+                "minimum": 0,
+                "maximum": maximum,
+                "x-ui": { "widget": "time-minute", "max": maximum }
+            }),
+        };
+        let start = field("start_minute", 1439);
+        let end = field("end_minute", 1440);
+
+        assert_eq!(parse(&start, "08:30"), Some(json!(510)));
+        assert_eq!(parse(&end, "23:59"), Some(json!(1439)));
+        assert_eq!(parse(&end, "24:00"), Some(json!(1440)));
+        assert_eq!(parse(&end, "24:00:00"), Some(json!(1440)));
+        assert_eq!(parse(&start, "24:00"), None);
+        assert_eq!(parse(&end, "24:01"), None);
+        assert_eq!(parse(&end, "8:30"), None);
+    }
+
+    #[test]
+    fn ticket_hours_rows_keep_default_panel_and_24_hour_end() {
+        let schema = json!({
+            "properties": { "config": { "properties": {
+                "hours": {
+                    "type": "array",
+                    "items": { "type": "object",
+                        "required": ["panel", "weekday", "start_minute", "end_minute"],
+                        "properties": {
+                            "panel": {
+                                "anyOf": [{ "type": "string" }, { "type": "null" }],
+                                "x-ui": { "widget": "ticket-panel" }
+                            },
+                            "weekday": {
+                                "type": "string",
+                                "enum": ["monday", "tuesday", "wednesday", "thursday",
+                                    "friday", "saturday", "sunday"]
+                            },
+                            "start_minute": {
+                                "type": "integer", "minimum": 0, "maximum": 1439,
+                                "x-ui": { "widget": "time-minute", "max": 1439 }
+                            },
+                            "end_minute": {
+                                "type": "integer", "minimum": 0, "maximum": 1440,
+                                "x-ui": { "widget": "time-minute", "max": 1440 }
+                            }
+                        }
+                    }
+                }
+            }}}
+        });
+        let field = fields(&schema)
+            .into_iter()
+            .find(|field| field.name == "hours")
+            .unwrap();
+        let Kind::List(columns) = &field.kind else {
+            panic!("hours is not a list");
+        };
+        let input = HashMap::from([
+            ("hours.0.panel".to_owned(), String::new()),
+            ("hours.0.weekday".to_owned(), "monday".to_owned()),
+            ("hours.0.start_minute".to_owned(), "08:30".to_owned()),
+            ("hours.0.end_minute.end-of-day".to_owned(), "1".to_owned()),
+            ("hours.1.panel".to_owned(), "billing".to_owned()),
+            ("hours.1.weekday".to_owned(), "monday".to_owned()),
+            ("hours.1.start_minute".to_owned(), "13:00".to_owned()),
+            ("hours.1.end_minute".to_owned(), "17:00".to_owned()),
+        ]);
+
+        assert_eq!(
+            rows(&field, columns, &input),
+            Some(json!([
+                {
+                    "panel": null,
+                    "weekday": "monday",
+                    "start_minute": 510,
+                    "end_minute": 1440
+                },
+                {
+                    "panel": "billing",
+                    "weekday": "monday",
+                    "start_minute": 780,
+                    "end_minute": 1020
+                }
+            ]))
+        );
+
+        let removed_first = HashMap::from([
+            ("hours.0.x".to_owned(), "1".to_owned()),
+            ("hours.1.panel".to_owned(), "billing".to_owned()),
+            ("hours.1.weekday".to_owned(), "monday".to_owned()),
+            ("hours.1.start_minute".to_owned(), "13:00".to_owned()),
+            ("hours.1.end_minute".to_owned(), "17:00".to_owned()),
+        ]);
+        assert_eq!(
+            rows(&field, columns, &removed_first),
+            Some(json!([{
+                "panel": "billing",
+                "weekday": "monday",
+                "start_minute": 780,
+                "end_minute": 1020
+            }]))
+        );
+
+        let invalid_start = HashMap::from([
+            ("hours.0.panel".to_owned(), String::new()),
+            ("hours.0.weekday".to_owned(), "monday".to_owned()),
+            ("hours.0.start_minute".to_owned(), "24:00".to_owned()),
+            ("hours.0.end_minute".to_owned(), "17:00".to_owned()),
+        ]);
+        assert_eq!(rows(&field, columns, &invalid_start), None);
+    }
+
+    #[test]
+    fn text_list_questions_keep_items_and_panel_arrays() {
+        let question = json!({
+            "type": "array",
+            "maxItems": 5,
+            "items": { "type": "string", "minLength": 1, "maxLength": 45 },
+            "x-ui": { "widget": "text-list" }
+        });
+        let module = json!({ "properties": { "config": { "properties": {
+            "questions": question.clone(),
+            "panels": { "type": "array", "maxItems": 5, "items": { "type": "object",
+                "required": ["id"], "properties": {
+                    "id": { "type": "string" },
+                    "staff_roles": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "x-ui": { "level": "basic", "widget": "roles" }
+                    },
+                    "questions": question,
+                    "timezone": { "type": "string" }
+                }
+            }}
+        }}}});
+        let fields = fields(&module);
+        let questions = fields
+            .iter()
+            .find(|field| field.name == "questions")
+            .unwrap();
+        let panels = fields.iter().find(|field| field.name == "panels").unwrap();
+        assert_eq!(questions.kind, Kind::TextList);
+        let Kind::List(columns) = &panels.kind else {
+            panic!("panels is not a list");
+        };
+        let role_column = columns
+            .iter()
+            .find(|column| column.name == "staff_roles")
+            .unwrap();
+        assert_eq!(role_column.kind, Kind::Roles);
+        assert_eq!(role_column.schema["x-ui"]["level"], "basic");
+        assert_eq!(
+            columns
+                .iter()
+                .find(|column| column.name == "questions")
+                .unwrap()
+                .kind,
+            Kind::TextList
+        );
+
+        let values = HashMap::from([
+            ("questions.0".to_owned(), "What, do you need?".to_owned()),
+            (
+                "questions.1".to_owned(),
+                "\nFirst line,\nsecond line".to_owned(),
+            ),
+            ("questions.2".to_owned(), String::new()),
+        ]);
+        assert_eq!(
+            text_list(questions, &values),
+            Some(json!(["What, do you need?", "\nFirst line,\nsecond line"]))
+        );
+        assert_eq!(text_list(questions, &HashMap::new()), Some(json!([])));
+        let replacement = HashMap::from([
+            ("questions.0.x".to_owned(), "1".to_owned()),
+            ("questions.1.x".to_owned(), "1".to_owned()),
+            ("questions.2.x".to_owned(), "1".to_owned()),
+            ("questions.3.x".to_owned(), "1".to_owned()),
+            ("questions.4.x".to_owned(), "1".to_owned()),
+            ("questions.5".to_owned(), "new one".to_owned()),
+            ("questions.6".to_owned(), "new two".to_owned()),
+            ("questions.7".to_owned(), "new three".to_owned()),
+            ("questions.8".to_owned(), "new four".to_owned()),
+            ("questions.9".to_owned(), "new five".to_owned()),
+        ]);
+        assert_eq!(
+            text_list(questions, &replacement),
+            Some(json!([
+                "new one",
+                "new two",
+                "new three",
+                "new four",
+                "new five"
+            ]))
+        );
+        assert_eq!(text_list_row_limit(questions), 10);
+        let invalid = HashMap::from([("questions.10".to_owned(), "outside".to_owned())]);
+        assert_eq!(text_list(questions, &invalid), None);
+        let too_many: HashMap<_, _> = (0..6)
+            .map(|index| (format!("questions.{index}"), "question".to_owned()))
+            .collect();
+        assert_eq!(text_list(questions, &too_many), None);
+        let too_long = HashMap::from([("questions.0".to_owned(), "x".repeat(46))]);
+        assert_eq!(text_list(questions, &too_long), None);
+        let comma_form = HashMap::from([("questions".to_owned(), "a,b".to_owned())]);
+        assert_eq!(text_list(questions, &comma_form), None);
+        assert!(!text_list_should_write(&json!([]), None, Some(&json!([]))));
+        assert!(text_list_should_write(
+            &json!([]),
+            None,
+            Some(&json!(["inherited"]))
+        ));
+        assert!(text_list_should_write(
+            &json!(["second", "first"]),
+            Some(&json!(["first", "second"])),
+            None
+        ));
+
+        let nested = HashMap::from([
+            ("panels.0.id".to_owned(), "billing".to_owned()),
+            ("panels.0.staff_roles".to_owned(), "13,99".to_owned()),
+            ("panels.0.timezone".to_owned(), String::new()),
+            (
+                "panels.0.questions.0".to_owned(),
+                "Panel, question\ncontinued".to_owned(),
+            ),
+        ]);
+        assert_eq!(
+            rows(panels, columns, &nested),
+            Some(json!([{
+                "id": "billing",
+                "staff_roles": ["13", "99"],
+                "questions": ["Panel, question\ncontinued"]
+            }]))
+        );
+        let removed = HashMap::from([
+            ("panels.0.id".to_owned(), "billing".to_owned()),
+            ("panels.0.staff_roles".to_owned(), "13".to_owned()),
+            ("panels.0.questions.0.x".to_owned(), "1".to_owned()),
+        ]);
+        assert_eq!(
+            rows(panels, columns, &removed),
+            Some(json!([{
+                "id": "billing",
+                "staff_roles": ["13"],
+                "questions": []
+            }]))
+        );
+        let malformed = HashMap::from([(
+            "panels.not-a-row.questions.0".to_owned(),
+            "value".to_owned(),
+        )]);
+        assert_eq!(rows(panels, columns, &malformed), None);
     }
 }

@@ -96,6 +96,7 @@ mod modules;
 mod overview;
 mod permissions;
 mod settings;
+mod tickets;
 
 /// The path of a page's line icon, shared by the sidebar and the page heading.
 fn page_icon(key: &str) -> &'static str {
@@ -109,6 +110,9 @@ fn page_icon(key: &str) -> &'static str {
         keys::HISTORY => "M12 21a9 9 0 100-18 9 9 0 000 18z M12 7v5l3 2",
         keys::PERMISSIONS => "M6 11h12v9H6z M8 11V8a4 4 0 118 0v3",
         keys::CASES => "M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5",
+        keys::TICKETS => {
+            "M3 8a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2a2 2 0 000-4zM13 6v12"
+        }
         _ => "",
     }
 }
@@ -192,6 +196,7 @@ pub(crate) use modules::{feature_toggle, modules_page, part_name};
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
 pub(crate) use settings::{SettingsPage, settings_page};
+pub(crate) use tickets::{ticket as ticket_page, tickets as tickets_page};
 
 pub(crate) fn shell(
     l: Locale<'_>,
@@ -209,6 +214,7 @@ pub(crate) fn shell(
         ("/compose", keys::COMPOSE),
         ("/settings", keys::SERVER_SETTINGS),
         ("/cases", keys::CASES),
+        ("/tickets", keys::TICKETS),
         ("/history", keys::HISTORY),
         ("/permissions", keys::PERMISSIONS),
     ] {

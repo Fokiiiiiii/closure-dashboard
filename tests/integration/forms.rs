@@ -69,6 +69,92 @@ pub(super) fn bot_data(
                 }
             }}]});
         }
+        if fake.ticket_questions {
+            let question = json!({
+                "type": "array",
+                "maxItems": 5,
+                "description": "config-tickets-questions",
+                "x-ui": { "level": "basic" },
+                "items": { "oneOf": [
+                    {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 45,
+                        "description": "config-tickets-question"
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type"],
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "text", "string_select", "user_select", "role_select",
+                                    "mentionable_select", "channel_select", "radio_group",
+                                    "checkbox_group", "display"
+                                ],
+                                "default": "text"
+                            },
+                            "label": { "type": "string", "minLength": 1, "maxLength": 45 },
+                            "content": { "type": "string", "minLength": 1, "maxLength": 4000 },
+                            "style": {
+                                "type": "string",
+                                "enum": ["short", "paragraph"],
+                                "default": "paragraph"
+                            },
+                            "required": { "type": "boolean", "default": true },
+                            "min_length": { "type": "integer", "minimum": 0, "maximum": 4000 },
+                            "max_length": {
+                                "type": "integer", "minimum": 1, "maximum": 4000,
+                                "default": 4000
+                            },
+                            "placeholder": { "type": "string", "maxLength": 100 },
+                            "description": { "type": "string", "maxLength": 100 },
+                            "options": {
+                                "type": "array",
+                                "maxItems": 25,
+                                "items": {
+                                    "type": "object",
+                                    "required": ["label", "value"],
+                                    "properties": {
+                                        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+                                        "value": { "type": "string", "minLength": 1, "maxLength": 100 },
+                                        "description": { "type": "string", "maxLength": 100 }
+                                    }
+                                }
+                            },
+                            "min_values": { "type": "integer", "minimum": 0, "maximum": 25 },
+                            "max_values": { "type": "integer", "minimum": 1, "maximum": 25 }
+                        }
+                    }
+                ]}
+            });
+            let mut tickets =
+                schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"].clone();
+            tickets["properties"]["config"]["anyOf"][0]["properties"] = json!({
+                "questions": question.clone(),
+                "panels": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": {
+                            "id": { "type": "string", "minLength": 1, "maxLength": 32 },
+                            "staff_roles": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "items": { "type": "string" },
+                                "x-ui": { "widget": "roles" }
+                            },
+                            "questions": question
+                        }
+                    }
+                }
+            });
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["tickets"] = tickets;
+        }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
             json!("<script>description</script>");
         schema["properties"]["modules"]["anyOf"][0]["properties"]["welcome"]["properties"]["config"]
@@ -110,6 +196,19 @@ pub(super) fn bot_data(
                     "staff_roles": ["13", "99"]
                 }],
                 "staff_roles": ["13"]
+            });
+        }
+        if fake.ticket_questions {
+            config["modules"]["tickets"] = json!({
+                "enabled": true,
+                "config": {
+                    "questions": ["What, do you need?", "\nTell us more,\nplease"],
+                    "panels": [{
+                        "id": "billing",
+                        "staff_roles": ["13"],
+                        "questions": ["Panel, first question", "Panel second question"]
+                    }]
+                }
             });
         }
         config
@@ -978,6 +1077,98 @@ async fn pages_keep_logout_without_preference_controls_and_use_correct_width() {
             assert!(!page.contains(forbidden), "{path}: {forbidden}");
         }
     }
+}
+
+#[tokio::test]
+async fn ticket_question_lists_render_and_round_trip_without_delimiters() {
+    let (config, state) = setup().await;
+    {
+        let mut state = state.lock().unwrap();
+        state.forms = true;
+        state.ticket_questions = true;
+    }
+    let path = "/g/42/modules/tickets";
+    let page = html(response(&config, Method::GET, path, "").await).await;
+    for expected in [
+        "name=\"f.questions.0.type\"",
+        "name=\"f.questions.0.label\"",
+        "name=\"f.questions.2.type\"",
+        "name=\"f.panels.0.questions.0.type\"",
+        "name=\"f.panels.0.questions.2.type\"",
+        "name=\"role_mode:panels.0.staff_roles\"",
+        "name=\"f.panels.0.staff_roles\"",
+        "What, do you need?",
+        "Panel, first question",
+        "プルダウン",
+        "チケットの質問",
+    ] {
+        assert!(page.contains(expected), "{expected}: {page}");
+    }
+
+    let body = "etag=%221%22&f.questions.0.type=legacy&f.questions.0.label=What%2C+do+you+need%3F&f.questions.1.type=legacy&f.questions.1.label=%0ATell+us+more%2C%0Aplease&f.questions.2.type=text&f.questions.2.label=Follow-up&f.questions.2.required=true&f.questions.2.style=paragraph&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=billing&f.panels.0.staff_roles=13&f.panels.0.questions.0.type=legacy&f.panels.0.questions.0.label=Panel%2C+first%0Asecond&f.panels.0.questions.1.type=string_select&f.panels.0.questions.1.label=Issue+category&f.panels.0.questions.1.required=true&f.panels.0.questions.1.options.0.label=Billing&f.panels.0.questions.1.options.0.value=billing&f.panels.0.questions.1.options.1.label=Other&f.panels.0.questions.1.options.1.value=other&f.panels.0.questions.2.type=text&f.panels.0.questions.2.required=true";
+    let saved = response(&config, Method::POST, path, body).await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    {
+        let state = state.lock().unwrap();
+        let saved = state.form_body.as_ref().unwrap();
+        assert_eq!(
+            saved["modules"]["tickets"]["config"]["questions"],
+            json!([
+                "What, do you need?",
+                "\nTell us more,\nplease",
+                {"type": "text", "label": "Follow-up", "required": true, "style": "paragraph"}
+            ])
+        );
+        assert_eq!(
+            saved["modules"]["tickets"]["config"]["panels"][0]["questions"],
+            json!([
+                "Panel, first\nsecond",
+                {
+                    "type": "string_select",
+                    "label": "Issue category",
+                    "required": true,
+                    "options": [
+                        {"label": "Billing", "value": "billing"},
+                        {"label": "Other", "value": "other"}
+                    ]
+                }
+            ])
+        );
+        assert_eq!(
+            saved["modules"]["tickets"]["config"]["panels"][0]["staff_roles"],
+            json!(["13"])
+        );
+    }
+
+    let remove = "etag=%221%22&f.questions.0.x=1&f.questions.1.x=1&f.questions.2.x=1&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=billing&f.panels.0.staff_roles=13&f.panels.0.questions.0.x=1&f.panels.0.questions.1.x=1";
+    let saved = response(&config, Method::POST, path, remove).await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let too_many = (0..6)
+        .map(|index| {
+            format!("&f.questions.{index}.type=legacy&f.questions.{index}.label=Question+{index}")
+        })
+        .collect::<String>();
+    assert_eq!(
+        response(
+            &config,
+            Method::POST,
+            path,
+            &format!("etag=%221%22{too_many}")
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let state = state.lock().unwrap();
+    let saved = state.form_body.as_ref().unwrap();
+    assert_eq!(
+        saved["modules"]["tickets"]["config"]["questions"],
+        json!([])
+    );
+    assert_eq!(
+        saved["modules"]["tickets"]["config"]["panels"][0]["questions"],
+        json!([])
+    );
 }
 
 #[tokio::test]

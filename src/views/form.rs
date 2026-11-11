@@ -36,6 +36,223 @@ fn option(output: &mut String, value: &str, label: &str, selected: bool) {
     );
 }
 
+const COMMON_TIME_ZONES: &[&str] = &[
+    "UTC",
+    "Africa/Cairo",
+    "Africa/Johannesburg",
+    "Africa/Lagos",
+    "Africa/Nairobi",
+    "America/Anchorage",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Mexico_City",
+    "America/New_York",
+    "America/Phoenix",
+    "America/Sao_Paulo",
+    "America/Toronto",
+    "America/Vancouver",
+    "Asia/Bangkok",
+    "Asia/Dubai",
+    "Asia/Hong_Kong",
+    "Asia/Jakarta",
+    "Asia/Jerusalem",
+    "Asia/Karachi",
+    "Asia/Kolkata",
+    "Asia/Seoul",
+    "Asia/Shanghai",
+    "Asia/Singapore",
+    "Asia/Taipei",
+    "Asia/Tokyo",
+    "Australia/Adelaide",
+    "Australia/Brisbane",
+    "Australia/Perth",
+    "Australia/Sydney",
+    "Europe/Amsterdam",
+    "Europe/Berlin",
+    "Europe/Helsinki",
+    "Europe/Istanbul",
+    "Europe/London",
+    "Europe/Moscow",
+    "Europe/Paris",
+    "Europe/Rome",
+    "Pacific/Auckland",
+    "Pacific/Honolulu",
+];
+
+fn parse_time_value(value: &str) -> Option<u32> {
+    if let Ok(minutes) = value.parse() {
+        return Some(minutes);
+    }
+    let mut parts = value.split(':');
+    let hour = parts.next()?;
+    let minute = parts.next()?;
+    let seconds = parts.next();
+    if parts.next().is_some()
+        || seconds.is_some_and(|seconds| seconds != "00")
+        || hour.len() != 2
+        || minute.len() != 2
+        || seconds.is_some_and(|seconds| seconds.len() != 2)
+        || !hour.bytes().all(|digit| digit.is_ascii_digit())
+        || !minute.bytes().all(|digit| digit.is_ascii_digit())
+    {
+        return None;
+    }
+    let hour = hour.parse::<u32>().ok()?;
+    let minute = minute.parse::<u32>().ok()?;
+    if hour == 24 && minute == 0 {
+        return Some(1440);
+    }
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
+fn time_minute_control(
+    l: Locale<'_>,
+    field: &Field,
+    id: &str,
+    value: &str,
+    invalid: bool,
+    labelled_by: Option<&str>,
+) -> String {
+    let raw_name = format!("f.{}", field.name);
+    let name = escape(&raw_name);
+    let max = field.schema["maximum"]
+        .as_i64()
+        .or_else(|| field.schema["x-ui"]["max"].as_i64())
+        .unwrap_or(1439);
+    let minutes = parse_time_value(value);
+    let end_of_day = max == 1440 && minutes == Some(1440);
+    let minute_input = minutes
+        .filter(|minutes| *minutes < 1440 && *minutes <= max.max(0) as u32)
+        .map_or_else(String::new, |minutes| {
+            format!("{:02}:{:02}", minutes / 60, minutes % 60)
+        });
+    let invalid_time = !value.is_empty() && !end_of_day && minute_input.is_empty();
+    let time_type = if invalid_time { "text" } else { "time" };
+    let shown_value: &str = if invalid_time { value } else { &minute_input };
+    let described = if invalid {
+        format!(" aria-describedby=\"{id}-error\"")
+    } else {
+        String::new()
+    };
+    let aria_invalid = if invalid || invalid_time {
+        " aria-invalid=\"true\""
+    } else {
+        ""
+    };
+    let labelled_by = labelled_by.map_or_else(String::new, |caption| {
+        format!(" aria-labelledby=\"{}\"", escape(caption))
+    });
+    let time_constraints = if invalid_time {
+        ""
+    } else {
+        " step=\"60\" max=\"23:59\""
+    };
+    let mut out = format!(
+        "<div class=\"time-minute-control\" data-time-minute><input type=\"{time_type}\" id=\"{id}\" name=\"{name}\"{described}{aria_invalid}{labelled_by}{time_constraints} data-minute-input value=\"{}\">",
+        escape(shown_value)
+    );
+    if max == 1440 {
+        let end_of_day_name = escape(&format!("{raw_name}.end-of-day"));
+        let checkbox_id = format!("{id}-end-of-day");
+        let _ = write!(
+            out,
+            "<span class=\"time-minute-end\"><input type=\"checkbox\" id=\"{checkbox_id}\" name=\"{end_of_day_name}\" value=\"1\" data-end-of-day{}><label for=\"{checkbox_id}\">{}</label></span>",
+            if end_of_day { " checked" } else { "" },
+            l.text("hours-end-of-day")
+        );
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn timezone_control(l: Locale<'_>, attrs: &str, id: &str, field: &Field, value: &str) -> String {
+    let list_id = format!("{id}-time-zones");
+    let placeholder_key = if field.name.ends_with(".timezone") {
+        "hours-timezone-inherit"
+    } else {
+        "hours-timezone-placeholder"
+    };
+    let placeholder = l.text(placeholder_key);
+    let pattern = field.schema["pattern"]
+        .as_str()
+        .map_or_else(String::new, |pattern| {
+            format!(" pattern=\"{}\"", escape(pattern))
+        });
+    let maxlength = field.schema["maxLength"]
+        .as_u64()
+        .map_or_else(String::new, |max| format!(" maxlength=\"{max}\""));
+    let mut out = format!(
+        "<input type=\"text\" {attrs} list=\"{list_id}\" placeholder=\"{}\"{pattern}{maxlength} value=\"{}\"><datalist id=\"{list_id}\" data-time-zone-list>",
+        escape(&placeholder),
+        escape(value)
+    );
+    let mut seen = HashSet::new();
+    for zone in COMMON_TIME_ZONES {
+        if seen.insert(*zone) {
+            option(&mut out, zone, zone, false);
+        }
+    }
+    if !value.trim().is_empty() && seen.insert(value) {
+        option(&mut out, value, value, false);
+    }
+    out.push_str("</datalist>");
+    out
+}
+
+fn ticket_panel_control(
+    l: Locale<'_>,
+    field: &Field,
+    id: &str,
+    value: &str,
+    panels: Option<&Value>,
+    invalid: bool,
+) -> String {
+    let name = escape(&format!("f.{}", field.name));
+    let described = if invalid {
+        format!(" aria-describedby=\"{id}-error\" aria-invalid=\"true\"")
+    } else {
+        String::new()
+    };
+    let mut out = format!("<select id=\"{id}\" name=\"{name}\"{described}>");
+    option(
+        &mut out,
+        "",
+        &l.text("hours-panel-default"),
+        value.is_empty(),
+    );
+    let mut found = value.is_empty();
+    let mut seen = HashSet::new();
+    for panel in panels.and_then(Value::as_array).into_iter().flatten() {
+        let Some(panel_id) = panel["id"].as_str().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        if !seen.insert(panel_id) {
+            continue;
+        }
+        let selected = panel_id == value;
+        found |= selected;
+        let label = panel["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                panel["label"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+            })
+            .unwrap_or(panel_id);
+        option(&mut out, panel_id, label, selected);
+    }
+    if !found {
+        let label = l.with_text("hours-panel-unknown", "id", value);
+        option(&mut out, value, &label, true);
+    }
+    out.push_str("</select>");
+    out
+}
+
 /// The heading of one card of a big module's settings.
 pub(super) fn section_title(l: Locale<'_>, key: &str) -> String {
     l.text(match key {
@@ -62,6 +279,19 @@ pub(super) fn section_title(l: Locale<'_>, key: &str) -> String {
 
 /// The shown text of one choice: translated when it is a value the dashboard knows, else as sent.
 fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
+    if field.name.rsplit('.').next() == Some("weekday") {
+        let key = match value {
+            "monday" => "hours-weekday-monday",
+            "tuesday" => "hours-weekday-tuesday",
+            "wednesday" => "hours-weekday-wednesday",
+            "thursday" => "hours-weekday-thursday",
+            "friday" => "hours-weekday-friday",
+            "saturday" => "hours-weekday-saturday",
+            "sunday" => "hours-weekday-sunday",
+            _ => return escape(value),
+        };
+        return l.text(key);
+    }
     let server_language =
         field.name == "language" && field.schema["x-ui"]["server_settings"] == true;
     let key = match value {
@@ -149,6 +379,12 @@ pub(super) fn control(
         result.push_str("</select>");
         return result;
     }
+    if widget == "time-minute" {
+        return time_minute_control(l, field, &id, value, invalid, None);
+    }
+    if field.name == "timezone" || field.name.ends_with(".timezone") {
+        return timezone_control(l, &attrs, &id, field, value);
+    }
     match &field.kind {
         Kind::Boolean => format!(
             "<input type=\"hidden\" name=\"{name}\" value=\"false\"><input type=\"checkbox\" class=\"switch\" {attrs} value=\"true\"{}>",
@@ -213,7 +449,12 @@ pub(super) fn control(
                 escape(value)
             )
         }
-        Kind::List(_) | Kind::Entries | Kind::Structured | Kind::Message(_) => String::new(),
+        Kind::List(_)
+        | Kind::Entries
+        | Kind::TextList
+        | Kind::FormQuestions
+        | Kind::Structured
+        | Kind::Message(_) => String::new(),
         Kind::String | Kind::Roles | Kind::Words | Kind::FlagOrRoles => {
             let pattern = field.schema["pattern"]
                 .as_str()
@@ -306,6 +547,9 @@ fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &V
 fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
     l.text(match name {
         "id" if panel => keys::COL_PANEL_ID,
+        "name" if panel => "col-panel-name",
+        "description" if panel => "col-panel-description",
+        "button_style" if panel => "col-panel-button-style",
         "channel" => keys::COL_CHANNEL,
         "role" => keys::COL_ROLE,
         "level" => keys::COL_LEVEL,
@@ -321,9 +565,15 @@ fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
         "label" => keys::COL_LABEL,
         "reason" => keys::COL_REASON,
         "category" => keys::COL_CATEGORY,
+        "panel" => "hours-panel",
+        "weekday" => "hours-weekday",
+        "start_minute" => "hours-start",
+        "end_minute" => "hours-end",
+        "timezone" => "hours-timezone-override",
         "staff_roles" => keys::COL_STAFF_ROLES,
         "log_channel" => keys::COL_LOG_CHANNEL,
         "close_after_days" => keys::COL_CLOSE_AFTER_DAYS,
+        "questions" => keys::COL_QUESTIONS,
         _ => return escape(name),
     })
 }
@@ -600,6 +850,7 @@ struct ListEditorData<'a> {
     stored: Option<&'a Value>,
     input: &'a HashMap<String, String>,
     directory: Option<&'a Value>,
+    panel_options: Option<&'a Value>,
 }
 
 struct ListRow {
@@ -696,6 +947,46 @@ fn list_rows(data: &ListEditorData<'_>) -> (usize, Vec<ListRow>) {
     (current_len, rows)
 }
 
+fn list_cell_control(
+    l: Locale<'_>,
+    data: &ListEditorData<'_>,
+    cell: &Field,
+    control_index: &str,
+    column: &Column,
+    text: &str,
+) -> String {
+    let title = column_title(l, &column.name, data.field.name == "panels");
+    let mut out = String::new();
+    if column.schema["x-ui"]["widget"] == "ticket-panel" {
+        let id = format!("field-{control_index}");
+        let panel_control = ticket_panel_control(l, cell, &id, text, data.panel_options, false);
+        let _ = write!(
+            out,
+            "<label class=\"list-cell\"><span class=\"list-caption\">{title}</span>{panel_control}</label>"
+        );
+    } else if column.schema["x-ui"]["widget"] == "time-minute" {
+        let id = format!("field-{control_index}");
+        let caption_id = format!("{id}-caption");
+        let end_of_day = data
+            .input
+            .get(&format!("{}.end-of-day", cell.name))
+            .is_some_and(|value| value == "1");
+        let time_value: &str = if end_of_day { "1440" } else { text };
+        let time_control = time_minute_control(l, cell, &id, time_value, false, Some(&caption_id));
+        let _ = write!(
+            out,
+            "<div class=\"list-cell\"><span id=\"{caption_id}\" class=\"list-caption\">{title}</span>{time_control}</div>"
+        );
+    } else {
+        let _ = write!(
+            out,
+            "<label class=\"list-cell\"><span class=\"list-caption\">{title}</span>{}</label>",
+            control(l, cell, control_index, text, data.directory, false)
+        );
+    }
+    out
+}
+
 fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &ListRow) -> String {
     let prefix = format!("{}.", data.field.name);
     let mut out = String::from("<div class=\"list-row\">");
@@ -755,13 +1046,42 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
                 picker,
             };
             out.push_str(&roles_cell(l, &role));
-        } else {
+        } else if column.kind == form::Kind::TextList {
+            let current = data
+                .current
+                .as_array()
+                .and_then(|rows| rows.get(row.number))
+                .and_then(|current| current.get(&column.name))
+                .unwrap_or(&Value::Null);
+            let editor = text_list_editor(l, &cell, &control_index, current, data.input, false);
             let _ = write!(
                 out,
-                "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
-                column_title(l, &column.name, data.field.name == "panels"),
-                control(l, &cell, control_index, text, data.directory, false)
+                "<div class=\"list-cell list-text-list\"><span class=\"list-caption\">{}</span>{editor}</div>",
+                column_title(l, &column.name, data.field.name == "panels")
             );
+        } else if column.kind == form::Kind::FormQuestions {
+            let current = data
+                .current
+                .as_array()
+                .and_then(|rows| rows.get(row.number))
+                .and_then(|current| current.get(&column.name))
+                .unwrap_or(&Value::Null);
+            let editor =
+                form_questions_editor(l, &cell, &control_index, current, data.input, false);
+            let _ = write!(
+                out,
+                r#"<div class="list-cell list-form-questions"><span class="list-caption">{}</span>{editor}</div>"#,
+                column_title(l, &column.name, data.field.name == "panels")
+            );
+        } else {
+            out.push_str(&list_cell_control(
+                l,
+                data,
+                &cell,
+                &control_index,
+                column,
+                text,
+            ));
         }
     }
     let has_content = data
@@ -789,6 +1109,494 @@ fn list_editor(l: Locale<'_>, data: &ListEditorData<'_>) -> String {
     let mut out = String::from("<div class=\"list-editor\">");
     for row in &rows {
         out.push_str(&list_row(l, data, current_len, row));
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn text_list_editor(
+    l: Locale<'_>,
+    field: &Field,
+    index: impl std::fmt::Display,
+    current: &Value,
+    input: &HashMap<String, String>,
+    invalid: bool,
+) -> String {
+    let prefix = format!("{}.", field.name);
+    let row_limit = form::text_list_row_limit(field);
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .filter(|number| *number < row_limit)
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    let mut rows: Vec<(String, bool)> = if numbers.is_empty() {
+        current
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|value| {
+                (
+                    value
+                        .as_str()
+                        .map_or_else(|| value.to_string(), str::to_owned),
+                    false,
+                )
+            })
+            .collect()
+    } else {
+        numbers
+            .iter()
+            .map(|&number| {
+                let key = format!("{prefix}{number}");
+                (
+                    input.get(&key).cloned().unwrap_or_default(),
+                    input
+                        .get(&format!("{key}.x"))
+                        .is_some_and(|value| value == "1"),
+                )
+            })
+            .collect()
+    };
+    rows.retain(|(value, removed)| *removed || !value.is_empty());
+    let existing = rows.len();
+    let active = rows.iter().filter(|(_, removed)| !removed).count();
+    let blanks = form::text_list_limit(field)
+        .saturating_sub(active)
+        .min(row_limit.saturating_sub(rows.len()));
+    rows.extend((0..blanks).map(|_| (String::new(), false)));
+
+    let field_id = format!("field-{index}");
+    let mut out = String::from(r#"<div class="list-editor text-list-editor">"#);
+    for (row, (value, removed)) in rows.iter().enumerate() {
+        let id = if row == 0 {
+            field_id.clone()
+        } else {
+            format!("{field_id}-{row}")
+        };
+        let described = if invalid {
+            format!(r#" aria-describedby="{field_id}-error" aria-invalid="true""#)
+        } else {
+            String::new()
+        };
+        let max = field.schema["items"]["maxLength"]
+            .as_u64()
+            .map_or_else(String::new, |max| format!(r#" maxlength="{max}""#));
+        let item = format!("{} {}", l.text(keys::TEXT_LIST_ITEM), row + 1);
+        let _ = write!(
+            out,
+            r#"<div class="list-row"><label class="list-cell list-question"><span class="list-caption">{item}</span><textarea id="{}" name="{}" rows="3"{max}{described}>"#,
+            escape(&id),
+            escape(&format!("f.{}{row}", field.name)),
+        );
+        out.push('\n');
+        out.push_str(&escape(value));
+        out.push_str("</textarea></label>");
+        if row < existing {
+            let _ = write!(
+                out,
+                r#"<label class="list-cell list-remove"><span class="list-caption">{}</span><input type="checkbox" name="{}" value="1"{}></label>"#,
+                l.text(keys::COL_REMOVE),
+                escape(&format!("f.{}{row}.x", field.name)),
+                if *removed { " checked" } else { "" }
+            );
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn form_question_value_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Number(value)) => value.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn form_question_type_label(l: Locale<'_>, kind: &str) -> String {
+    let key = match kind {
+        "legacy" => "form-question-type-legacy",
+        "text" => "form-question-type-text",
+        "string_select" => "form-question-type-string-select",
+        "user_select" => "form-question-type-user-select",
+        "role_select" => "form-question-type-role-select",
+        "mentionable_select" => "form-question-type-mentionable-select",
+        "channel_select" => "form-question-type-channel-select",
+        "radio_group" => "form-question-type-radio-group",
+        "checkbox_group" => "form-question-type-checkbox-group",
+        "display" => "form-question-type-display",
+        _ => return kind.to_owned(),
+    };
+    l.text(key)
+}
+
+fn form_question_options_editor(
+    l: Locale<'_>,
+    field: &Field,
+    question: usize,
+    original: Option<&Value>,
+    input: &HashMap<String, String>,
+) -> String {
+    let prefix = format!("{}.{}.options.", field.name, question);
+    let max = field.schema["items"]["oneOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|schema| schema["type"] == "object")
+        .and_then(|schema| schema["properties"]["options"]["maxItems"].as_u64())
+        .unwrap_or(25) as usize;
+    let existing = original
+        .and_then(|value| value["options"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .filter(|number| *number < max.saturating_add(5))
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    if numbers.is_empty() {
+        numbers.extend(0..existing.len().saturating_add(2).max(2).min(max));
+    }
+    let mut out = format!(
+        "<details><summary>{}</summary>",
+        escape(&l.text("form-question-options"))
+    );
+    for number in numbers.into_iter().take(max) {
+        let option_prefix = format!("{prefix}{number}");
+        let original_option = existing.get(number);
+        let value = |name: &str| {
+            input
+                .get(&format!("{option_prefix}.{name}"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    form_question_value_text(original_option.and_then(|option| option.get(name)))
+                })
+        };
+        let label = value("label");
+        let choice_value = value("value");
+        let description = value("description");
+        let removed = input
+            .get(&format!("{option_prefix}.x"))
+            .is_some_and(|value| value == "1");
+        let active = !label.is_empty() || !choice_value.is_empty() || !description.is_empty();
+        let row_id = format!("field-{}-question-{}-option-{number}", field.name, question);
+        out.push_str(r#"<div class="list-row question-option-row">"#);
+        for (property, caption, text) in [
+            ("label", "form-question-option-label", label.as_str()),
+            ("value", "form-question-option-value", choice_value.as_str()),
+            (
+                "description",
+                "form-question-option-description",
+                description.as_str(),
+            ),
+        ] {
+            let id = escape(&format!("{row_id}-{property}"));
+            let name = escape(&format!("f.{option_prefix}.{property}"));
+            let _ = write!(
+                out,
+                r#"<label class="list-cell"><span class="list-caption">{}</span><input id="{}" name="{}" maxlength="100" value="{}"></label>"#,
+                escape(&l.text(caption)),
+                id,
+                name,
+                escape(text)
+            );
+        }
+        if original_option.is_some() || active || removed {
+            let name = escape(&format!("f.{option_prefix}.x"));
+            let _ = write!(
+                out,
+                r#"<label class="list-cell list-remove"><span class="list-caption">{}</span><input type="checkbox" name="{}" value="1"{}></label>"#,
+                l.text(keys::COL_REMOVE),
+                name,
+                if removed { " checked" } else { "" }
+            );
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</details>");
+    out
+}
+
+fn form_questions_editor(
+    l: Locale<'_>,
+    field: &Field,
+    index: impl std::fmt::Display,
+    current: &Value,
+    input: &HashMap<String, String>,
+    invalid: bool,
+) -> String {
+    let prefix = format!("{}.", field.name);
+    let max = field.schema["maxItems"].as_u64().unwrap_or(5).min(5) as usize;
+    let row_limit = max.saturating_add(5);
+    let current_rows = current.as_array().cloned().unwrap_or_default();
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .filter(|number| *number < row_limit)
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    if numbers.is_empty() {
+        numbers.extend(0..current_rows.len().min(row_limit));
+        if numbers.len() < max {
+            numbers.push(numbers.len());
+        }
+        if numbers.is_empty() {
+            numbers.push(0);
+        }
+    }
+    let field_id = format!("field-{index}");
+    let described = if invalid {
+        format!(r#" aria-describedby="{field_id}-error" aria-invalid="true""#)
+    } else {
+        String::new()
+    };
+    let kinds = [
+        "legacy",
+        "text",
+        "string_select",
+        "user_select",
+        "role_select",
+        "mentionable_select",
+        "channel_select",
+        "radio_group",
+        "checkbox_group",
+        "display",
+    ];
+    let mut out = String::from(r#"<div class="list-editor form-question-editor">"#);
+    for row in numbers.into_iter().take(row_limit) {
+        let row_prefix = format!("{}.{row}", field.name);
+        let original = current_rows.get(row);
+        let input_value = |property: &str| {
+            input
+                .get(&format!("{row_prefix}.{property}"))
+                .map(String::as_str)
+        };
+        let row_has_input = input
+            .keys()
+            .any(|name| name.starts_with(&format!("{row_prefix}.")));
+        let original_kind = match original {
+            Some(Value::String(_)) => "legacy",
+            Some(Value::Object(question)) => question
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("text"),
+            _ => "text",
+        };
+        let kind = input_value("type").unwrap_or(original_kind);
+        let label_default = match original {
+            Some(Value::String(value)) => value.as_str(),
+            Some(Value::Object(question)) => {
+                question.get("label").and_then(Value::as_str).unwrap_or("")
+            }
+            _ => "",
+        };
+        let label = input_value("label").unwrap_or(label_default);
+        let description = input_value("description").unwrap_or_else(|| {
+            original
+                .and_then(|question| question.get("description"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        });
+        let content = input_value("content").unwrap_or_else(|| {
+            original
+                .and_then(|question| question.get("content"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        });
+        let required = input_value("required").map_or_else(
+            || {
+                if row_has_input {
+                    false
+                } else {
+                    original
+                        .and_then(|question| question.get("required"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true)
+                }
+            },
+            |value| value == "true",
+        );
+        let style = input_value("style").unwrap_or_else(|| {
+            original
+                .and_then(|question| question.get("style"))
+                .and_then(Value::as_str)
+                .unwrap_or("paragraph")
+        });
+        let min_length = input_value("min_length")
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                form_question_value_text(original.and_then(|question| question.get("min_length")))
+            });
+        let max_length = input_value("max_length")
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                form_question_value_text(original.and_then(|question| question.get("max_length")))
+            });
+        let placeholder = input_value("placeholder").unwrap_or_else(|| {
+            original
+                .and_then(|question| question.get("placeholder"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        });
+        let min_values = input_value("min_values")
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                form_question_value_text(original.and_then(|question| question.get("min_values")))
+            });
+        let max_values = input_value("max_values")
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                form_question_value_text(original.and_then(|question| question.get("max_values")))
+            });
+        let removed = input
+            .get(&format!("{row_prefix}.x"))
+            .is_some_and(|value| value == "1");
+        let row_id = format!("{field_id}-question-{row}");
+        let question_title = format!("{} {}", l.text(keys::TEXT_LIST_ITEM), row + 1);
+        let _ = write!(
+            out,
+            r#"<div class="list-row form-question-row"><div class="list-cell"><span class="list-caption">{}</span>"#,
+            escape(&question_title)
+        );
+        let type_id = escape(&format!("{row_id}-type"));
+        let type_name = escape(&format!("f.{row_prefix}.type"));
+        let type_label = escape(&l.text("form-question-type"));
+        let _ = write!(
+            out,
+            r#"<select id="{type_id}" name="{type_name}" aria-label="{type_label}"{described}>"#
+        );
+        for value in kinds {
+            option(
+                &mut out,
+                value,
+                &form_question_type_label(l, value),
+                kind == value,
+            );
+        }
+        if !kinds.contains(&kind) {
+            option(&mut out, kind, kind, true);
+        }
+        out.push_str("</select></div>");
+        let label_id = escape(&format!("{row_id}-label"));
+        let label_name = escape(&format!("f.{row_prefix}.label"));
+        let _ = write!(
+            out,
+            r#"<label class="list-cell list-question"><span class="list-caption">{}</span><textarea id="{label_id}" name="{label_name}" rows="2" maxlength="45"{described}>"#,
+            l.text("form-question-label")
+        );
+        out.push_str(&escape(label));
+        out.push_str("</textarea></label>");
+        let required_id = escape(&format!("{row_id}-required"));
+        let required_name = escape(&format!("f.{row_prefix}.required"));
+        let _ = write!(
+            out,
+            r#"<label class="list-cell"><span class="list-caption">{}</span><input type="checkbox" id="{required_id}" name="{required_name}" value="true"{}{described}></label>"#,
+            l.text("form-question-required"),
+            if required { " checked" } else { "" }
+        );
+        let _ = write!(
+            out,
+            r#"<details class="list-cell form-question-details"><summary>{}</summary><small class="muted">{}</small>"#,
+            l.text("form-question-more-settings"),
+            l.text("form-question-kind-hint")
+        );
+        let _ = write!(
+            out,
+            r#"<label class="list-cell"><span class="list-caption">{}</span><input type="text" name="f.{row_prefix}.description" maxlength="100" value="{}"></label>"#,
+            l.text("form-question-description"),
+            escape(description)
+        );
+        let _ = write!(
+            out,
+            r#"<label class="list-cell list-question"><span class="list-caption">{}</span><textarea name="f.{row_prefix}.content" rows="3" maxlength="4000">{}</textarea></label>"#,
+            l.text("form-question-content"),
+            escape(content)
+        );
+        let style_id = escape(&format!("{row_id}-style"));
+        let _ = write!(
+            out,
+            r#"<label class="list-cell"><span class="list-caption">{}</span><select id="{style_id}" name="f.{row_prefix}.style">"#,
+            l.text("form-question-style")
+        );
+        option(
+            &mut out,
+            "short",
+            &l.text("form-question-style-short"),
+            style == "short",
+        );
+        option(
+            &mut out,
+            "paragraph",
+            &l.text("form-question-style-paragraph"),
+            style == "paragraph",
+        );
+        out.push_str("</select></label>");
+        for (property, caption, value, min, maximum) in [
+            (
+                "min_length",
+                "form-question-min-length",
+                min_length,
+                "0",
+                "4000",
+            ),
+            (
+                "max_length",
+                "form-question-max-length",
+                max_length,
+                "1",
+                "4000",
+            ),
+            (
+                "min_values",
+                "form-question-min-values",
+                min_values,
+                "0",
+                "25",
+            ),
+            (
+                "max_values",
+                "form-question-max-values",
+                max_values,
+                "1",
+                "25",
+            ),
+        ] {
+            let name = escape(&format!("f.{row_prefix}.{property}"));
+            let _ = write!(
+                out,
+                r#"<label class="list-cell"><span class="list-caption">{}</span><input type="number" name="{name}" min="{min}" max="{maximum}" value="{}"></label>"#,
+                l.text(caption),
+                escape(&value)
+            );
+        }
+        let placeholder_name = escape(&format!("f.{row_prefix}.placeholder"));
+        let _ = write!(
+            out,
+            r#"<label class="list-cell"><span class="list-caption">{}</span><input type="text" name="{placeholder_name}" maxlength="100" value="{}"></label>"#,
+            l.text("form-question-placeholder"),
+            escape(placeholder)
+        );
+        out.push_str(&form_question_options_editor(
+            l, field, row, original, input,
+        ));
+        out.push_str("</details>");
+        if original.is_some() || row_has_input || !label.is_empty() || removed {
+            let remove_name = escape(&format!("f.{row_prefix}.x"));
+            let _ = write!(
+                out,
+                r#"<label class="list-cell list-remove"><span class="list-caption">{}</span><input type="checkbox" name="{remove_name}" value="1"{}></label>"#,
+                l.text(keys::COL_REMOVE),
+                if removed { " checked" } else { "" }
+            );
+        }
+        out.push_str("</div>");
     }
     out.push_str("</div>");
     out
@@ -913,7 +1721,14 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 .map_or_else(String::new, |(name, value)| {
                     format!(" when\" data-when=\"{}={}", escape(name), escape(value))
                 });
-            let wide = if matches!(field.kind, Kind::List(_) | Kind::Entries | Kind::Message(_)) {
+            let wide = if matches!(
+                field.kind,
+                Kind::List(_)
+                    | Kind::Entries
+                    | Kind::TextList
+                    | Kind::FormQuestions
+                    | Kind::Message(_)
+            ) {
                 " wide"
             } else {
                 ""
@@ -936,10 +1751,10 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 "<div class=\"settings-row{wide}{when}\"><div>{heading}"
             );
             if inherited {
-                let note = if matches!(field.kind, Kind::Words | Kind::Roles) {
-                    keys::INHERITED_LIST
-                } else {
-                    keys::INHERITED
+                let note = match &field.kind {
+                    Kind::TextList | Kind::FormQuestions => keys::INHERITED_TEXT_LIST,
+                    Kind::Words | Kind::Roles => keys::INHERITED_LIST,
+                    _ => keys::INHERITED,
                 };
                 let _ = write!(body, "<small class=\"muted\">{}</small>", l.text(note));
             }
@@ -997,9 +1812,24 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                             stored: stored_current,
                             input,
                             directory,
+                            panel_options: form::lookup(
+                                &effective["modules"][module]["config"],
+                                "panels",
+                            ),
                         },
                     ),
                     Kind::Entries => entries_editor(l, field, current, input),
+                    Kind::TextList => {
+                        text_list_editor(l, field, index, current, input, field_errors.is_some())
+                    }
+                    Kind::FormQuestions => form_questions_editor(
+                        l,
+                        field,
+                        index,
+                        current,
+                        input,
+                        field_errors.is_some(),
+                    ),
                     Kind::Message(_) => message_row(l, id, module, field, current),
                     _ => control(l, field, index, value, directory, field_errors.is_some()),
                 }
@@ -1102,6 +1932,193 @@ mod tests {
         ]})
     }
 
+    fn ticket_hours_schema() -> serde_json::Value {
+        json!({"properties": {"config": {"properties": {
+            "timezone": {"type": "string"},
+            "hours": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {"type": "object", "required": [
+                    "panel", "weekday", "start_minute", "end_minute"
+                ], "properties": {
+                    "panel": {
+                        "anyOf": [
+                            {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,32}$"},
+                            {"type": "null"}
+                        ],
+                        "x-ui": {"widget": "ticket-panel"}
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "enum": ["monday", "tuesday", "wednesday", "thursday",
+                            "friday", "saturday", "sunday"]
+                    },
+                    "start_minute": {
+                        "type": "integer", "minimum": 0, "maximum": 1439,
+                        "x-ui": {"widget": "time-minute", "max": 1439}
+                    },
+                    "end_minute": {
+                        "type": "integer", "minimum": 0, "maximum": 1440,
+                        "x-ui": {"widget": "time-minute", "max": 1440}
+                    }
+                }}
+            },
+            "panels": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {"type": "object", "required": ["id"], "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "staff_roles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "x-ui": {"level": "basic", "widget": "roles"}
+                    },
+                    "questions": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 45},
+                        "x-ui": {"widget": "text-list"}
+                    },
+                    "timezone": {"type": "string"}
+                }}
+            }
+        }}}})
+    }
+
+    fn ticket_hours_field() -> (crate::form::Field, Vec<crate::form::Column>) {
+        let field = crate::form::fields(&ticket_hours_schema())
+            .into_iter()
+            .find(|field| field.name == "hours")
+            .expect("hours field");
+        let columns = match &field.kind {
+            crate::form::Kind::List(columns) => columns.clone(),
+            _ => panic!("hours must be a list"),
+        };
+        (field, columns)
+    }
+
+    #[test]
+    fn ticket_hours_and_panel_questions_roles_render_together() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let locale = catalogs.locale("en");
+        let (hours, hours_columns) = ticket_hours_field();
+        let fields = crate::form::fields(&ticket_hours_schema());
+        let panels = fields.iter().find(|field| field.name == "panels").unwrap();
+        let timezone = fields
+            .iter()
+            .find(|field| field.name == "timezone")
+            .unwrap();
+        let crate::form::Kind::List(panel_columns) = &panels.kind else {
+            panic!("panels is not a list");
+        };
+        let current = serde_json::json!({
+            "hours": [{
+                "panel": "billing",
+                "weekday": "monday",
+                "start_minute": 510,
+                "end_minute": 1440
+            }],
+            "panels": [{
+                "id": "billing",
+                "name": "Billing",
+                "staff_roles": ["13"],
+                "questions": ["Need help?"],
+                "timezone": ""
+            }]
+        });
+        let hours_values = current["hours"].clone();
+        let panel_values = current["panels"].clone();
+        let directory = role_directory();
+        let input = HashMap::new();
+        let hours_html = list_editor(
+            locale,
+            &ListEditorData {
+                field: &hours,
+                columns: &hours_columns,
+                index: 0,
+                current: &hours_values,
+                stored: Some(&hours_values),
+                input: &input,
+                directory: None,
+                panel_options: Some(&panel_values),
+            },
+        );
+        let retry_input = HashMap::from([
+            ("hours.0.panel".to_owned(), "billing".to_owned()),
+            ("hours.0.weekday".to_owned(), "friday".to_owned()),
+            ("hours.0.start_minute".to_owned(), "09:15".to_owned()),
+            ("hours.0.end_minute".to_owned(), "18:00".to_owned()),
+        ]);
+        let retry_html = list_editor(
+            locale,
+            &ListEditorData {
+                field: &hours,
+                columns: &hours_columns,
+                index: 0,
+                current: &hours_values,
+                stored: Some(&hours_values),
+                input: &retry_input,
+                directory: None,
+                panel_options: Some(&panel_values),
+            },
+        );
+        assert!(retry_html.contains("value=\"09:15\""), "{retry_html}");
+        assert!(retry_html.contains("value=\"18:00\""), "{retry_html}");
+        assert!(
+            retry_html.contains("value=\"friday\" selected"),
+            "{retry_html}"
+        );
+
+        let panels_html = list_editor(
+            locale,
+            &ListEditorData {
+                field: panels,
+                columns: panel_columns,
+                index: 1,
+                current: &panel_values,
+                stored: Some(&panel_values),
+                input: &input,
+                directory: Some(&directory),
+                panel_options: Some(&panel_values),
+            },
+        );
+        let unknown_timezone = control(
+            locale,
+            timezone,
+            "global-timezone",
+            "Mars/Olympus_Mons",
+            None,
+            false,
+        );
+        let html = format!("{hours_html}{panels_html}{unknown_timezone}");
+
+        assert!(html.contains("name=\"f.hours.0.panel\""), "{html}");
+        assert!(html.contains("Billing"), "{html}");
+        assert!(html.contains("name=\"f.hours.0.weekday\""), "{html}");
+        assert!(html.contains("Monday"), "{html}");
+        assert!(html.contains("name=\"f.hours.0.start_minute\""), "{html}");
+        assert!(html.contains("value=\"08:30\""), "{html}");
+        assert!(
+            html.contains("name=\"f.hours.0.end_minute.end-of-day\""),
+            "{html}"
+        );
+        assert!(html.contains("24:00 (midnight)"), "{html}");
+        assert!(html.contains("name=\"f.panels.0.staff_roles\""), "{html}");
+        assert!(html.contains("Support"), "{html}");
+        assert!(html.contains("name=\"f.panels.0.questions.0\""), "{html}");
+        assert!(html.contains("Need help?"), "{html}");
+        assert!(
+            html.contains("Leave blank to use the global time zone"),
+            "{html}"
+        );
+        assert!(html.contains("value=\"Mars/Olympus_Mons\""), "{html}");
+        assert!(
+            html.contains("<option value=\"Mars/Olympus_Mons\">"),
+            "{html}"
+        );
+    }
+
     #[test]
     fn a_channel_widget_offers_the_kinds_its_schema_names() {
         let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
@@ -1154,6 +2171,9 @@ mod tests {
             "maxItems": 1,
             "items": {"type": "object", "required": ["id"], "properties": {
                 "id": {"type": "string"},
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "button_style": {"type": "string", "enum": ["primary", "secondary"]},
                 "category": {"type": "string"},
                 "staff_roles": {"type": "array", "items": {"type": "string"}},
                 "log_channel": {"type": "string"},
@@ -1172,6 +2192,9 @@ mod tests {
                 "en",
                 [
                     "Panel ID",
+                    "Panel name",
+                    "Description",
+                    "Button style",
                     "Category",
                     "Staff role IDs (comma separated)",
                     "Log channel",
@@ -1182,6 +2205,9 @@ mod tests {
                 "ja",
                 [
                     "パネルID",
+                    "パネル名",
+                    "説明",
+                    "ボタンのスタイル",
                     "カテゴリ",
                     "スタッフロールID（カンマ区切り）",
                     "ログチャンネル",
@@ -1199,6 +2225,7 @@ mod tests {
                     stored: None,
                     input: &input,
                     directory: None,
+                    panel_options: None,
                 },
             );
             for caption in captions {
@@ -1222,6 +2249,7 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
         assert!(
@@ -1241,6 +2269,7 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
         assert!(
@@ -1267,11 +2296,21 @@ mod tests {
                 stored: Some(&current),
                 input: &input,
                 directory: Some(&directory),
+                panel_options: None,
             },
         );
-        assert!(english.contains("class=\"list-cell list-roles\" role=\"group\" aria-labelledby="));
+        let staff_roles_column = columns
+            .iter()
+            .position(|column| column.name == "staff_roles")
+            .unwrap();
+        let caption_id = format!("field-list-0-0-{staff_roles_column}-caption");
+        assert!(english.contains(&format!(
+            "class=\"list-cell list-roles\" role=\"group\" aria-labelledby=\"{caption_id}\""
+        )));
         assert!(english.contains("role=\"radiogroup\""));
-        assert!(english.contains("<span class=\"list-caption\">Staff roles</span>"));
+        assert!(english.contains(&format!(
+            "<span id=\"{caption_id}\" class=\"list-caption\">Staff roles</span>"
+        )));
         assert!(english.contains("name=\"role_mode:panels.0.staff_roles\" value=\"set\" checked"));
         assert!(english.contains("name=\"f.panels.0.staff_roles\" value=\"13\" checked"));
         assert!(english.contains("value=\"99\" checked>Unknown role 99"));
@@ -1286,9 +2325,12 @@ mod tests {
                 stored: Some(&current),
                 input: &input,
                 directory: Some(&directory),
+                panel_options: None,
             },
         );
-        assert!(japanese.contains("<span class=\"list-caption\">スタッフロール</span>"));
+        assert!(japanese.contains(&format!(
+            "<span id=\"{caption_id}\" class=\"list-caption\">スタッフロール</span>"
+        )));
         assert!(japanese.contains("不明なロール 99"));
     }
 
@@ -1310,6 +2352,7 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: Some(&directory),
+                panel_options: None,
             },
         );
         assert!(inherited_html.contains("value=\"default\" checked"));
@@ -1326,6 +2369,7 @@ mod tests {
                 stored: Some(&empty),
                 input: &input,
                 directory: Some(&directory),
+                panel_options: None,
             },
         );
         assert!(empty_html.contains("value=\"set\" checked"));
@@ -1342,6 +2386,7 @@ mod tests {
                 stored: Some(&duplicate),
                 input: &input,
                 directory: Some(&directory),
+                panel_options: None,
             },
         );
         assert!(duplicate_html.contains("name=\"f.panels.0.staff_roles\" value=\"13, 13\""));
@@ -1365,6 +2410,7 @@ mod tests {
                 stored: Some(&inherited),
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
         assert!(missing_directory.contains("name=\"f.panels.0.staff_roles\" value=\"13\""));
@@ -1398,6 +2444,7 @@ mod tests {
                 stored,
                 input: &input,
                 directory: Some(&role_directory()),
+                panel_options: None,
             },
         );
 
@@ -1425,6 +2472,7 @@ mod tests {
                     stored: None,
                     input: &input,
                     directory: None,
+                    panel_options: None,
                 },
             );
             assert!(
@@ -1450,11 +2498,123 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
 
         assert!(html.contains("name=\"f.panels.24.id\""), "{html}");
         assert!(!html.contains("name=\"f.panels.25.id\""), "{html}");
+    }
+
+    #[test]
+    fn text_lists_render_without_role_columns_and_limit_error_rows() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let question = serde_json::json!({
+            "type": "array",
+            "maxItems": 5,
+            "items": { "type": "string", "minLength": 1, "maxLength": 45 },
+            "description": "questions",
+            "x-ui": { "level": "basic", "widget": "text-list" }
+        });
+        let module = serde_json::json!({
+            "properties": { "config": { "properties": {
+                "questions": question.clone(),
+                "panels": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": {
+                            "id": { "type": "string" },
+                            "questions": question
+                        }
+                    }
+                }
+            }}}
+        });
+        let fields = crate::form::fields(&module);
+        let root = fields
+            .iter()
+            .find(|field| field.name == "questions")
+            .unwrap();
+        let panels = fields.iter().find(|field| field.name == "panels").unwrap();
+        let values = serde_json::json!(["Need, help?", "\nAdditional,\ndetails"]);
+        for (tag, label) in [("en", "Question 1"), ("ja", "質問 1")] {
+            let html = super::text_list_editor(
+                catalogs.locale(tag),
+                root,
+                0,
+                &values,
+                &std::collections::HashMap::new(),
+                false,
+            );
+            assert_eq!(html.matches("<textarea").count(), 5, "{tag}: {html}");
+            assert!(
+                html.contains(
+                    r#"<textarea id="field-0" name="f.questions.0" rows="3" maxlength="45">"#
+                ),
+                "{html}"
+            );
+            assert!(html.contains(label), "{tag}: {html}");
+            assert!(html.contains("Need, help?"), "{html}");
+            assert!(html.contains("Additional,\ndetails"), "{html}");
+            assert!(html.contains(">\n\nAdditional,"), "{html}");
+            assert_eq!(html.matches("list-cell list-remove").count(), 2, "{html}");
+        }
+
+        let empty = super::text_list_editor(
+            catalogs.locale("en"),
+            root,
+            0,
+            &serde_json::json!([]),
+            &std::collections::HashMap::new(),
+            false,
+        );
+        assert_eq!(empty.matches("<textarea").count(), 5, "{empty}");
+        assert!(!empty.contains("list-cell list-remove"), "{empty}");
+
+        let crate::form::Kind::List(columns) = &panels.kind else {
+            panic!("panels is not a list");
+        };
+        let panel_values = serde_json::json!([{
+            "id": "billing",
+            "questions": ["Panel, prompt"]
+        }]);
+        let panel_html = super::list_editor(
+            catalogs.locale("en"),
+            &super::ListEditorData {
+                field: panels,
+                columns,
+                index: 1,
+                current: &panel_values,
+                stored: Some(&panel_values),
+                input: &std::collections::HashMap::new(),
+                directory: None,
+                panel_options: None,
+            },
+        );
+        assert!(
+            panel_html.contains("name=\"f.panels.0.questions.0\""),
+            "{panel_html}"
+        );
+        assert!(panel_html.contains("Panel, prompt"), "{panel_html}");
+        assert!(panel_html.contains("Questions"), "{panel_html}");
+
+        let excessive: std::collections::HashMap<_, _> = (0..10_000)
+            .map(|index| (format!("questions.{index}"), "question".to_owned()))
+            .collect();
+        let limited = super::text_list_editor(
+            catalogs.locale("en"),
+            root,
+            0,
+            &serde_json::json!([]),
+            &excessive,
+            true,
+        );
+        assert_eq!(limited.matches("<textarea").count(), 10, "{limited}");
+        assert!(limited.contains(r#"aria-invalid="true""#), "{limited}");
+        assert!(!limited.contains(r#"name="f.questions.10""#), "{limited}");
     }
 
     #[test]
@@ -1473,6 +2633,7 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
         let mut adjacent_field = field.clone();
@@ -1488,6 +2649,7 @@ mod tests {
                 stored: None,
                 input: &input,
                 directory: None,
+                panel_options: None,
             },
         );
         let html = format!("{long_list}{adjacent_list}");

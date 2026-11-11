@@ -35,3 +35,22 @@
   form.addEventListener("input", refresh);
   form.addEventListener("change", refresh);
 })();
+
+(() => {
+  if (typeof Intl.supportedValuesOf !== "function") return;
+  let timeZones;
+  try {
+    timeZones = Intl.supportedValuesOf("timeZone");
+  } catch {
+    return;
+  }
+  for (const list of document.querySelectorAll("datalist[data-time-zone-list]")) {
+    const known = new Set(Array.from(list.options, (option) => option.value));
+    for (const timeZone of timeZones) {
+      if (known.has(timeZone)) continue;
+      const option = document.createElement("option");
+      option.value = timeZone;
+      list.append(option);
+    }
+  }
+})();

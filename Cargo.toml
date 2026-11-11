@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "form", "query"] }
 base64 = "0.22"
+chrono-tz = "0.10.4"
 fluent-bundle = "0.16"
 hmac = "0.13"
 http-body-util = "0.1"

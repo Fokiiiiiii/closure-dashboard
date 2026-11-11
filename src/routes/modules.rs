@@ -68,10 +68,15 @@ pub(super) fn shell_error(app: &App, headers: &HeaderMap, id: &str, error: &ApiE
 /// Whether the input `name` belongs to `field`: it is the field, or a cell of its rows.
 fn in_field(field: &form::Field, name: &str) -> bool {
     name == field.name
-        || (matches!(field.kind, form::Kind::List(_) | form::Kind::Entries)
-            && name
-                .strip_prefix(field.name.as_str())
-                .is_some_and(|rest| rest.starts_with('.')))
+        || (matches!(
+            field.kind,
+            form::Kind::List(_)
+                | form::Kind::Entries
+                | form::Kind::TextList
+                | form::Kind::FormQuestions
+        ) && name
+            .strip_prefix(field.name.as_str())
+            .is_some_and(|rest| rest.starts_with('.')))
 }
 
 fn role_input_value(name: &str, schema: &Value, mode: &str, values: Vec<String>) -> Option<String> {
@@ -448,6 +453,373 @@ pub(super) async fn save(
     save_part(State(app), Path((id, module, String::new())), headers, form).await
 }
 
+fn form_question_options(prefix: &str, input: &HashMap<String, String>) -> Option<Value> {
+    let prefix = format!("{prefix}.options.");
+    let mut numbers: Vec<usize> = input
+        .keys()
+        .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+        .filter(|number| *number < 30)
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    let mut options = Vec::new();
+    for number in numbers {
+        let option_prefix = format!("{prefix}{number}");
+        if input
+            .get(&format!("{option_prefix}.x"))
+            .is_some_and(|value| value == "1")
+        {
+            continue;
+        }
+        let mut option = serde_json::Map::new();
+        for name in ["label", "value", "description"] {
+            if let Some(value) = input
+                .get(&format!("{option_prefix}.{name}"))
+                .filter(|value| !value.is_empty())
+            {
+                option.insert(name.to_owned(), Value::String(value.clone()));
+            }
+        }
+        if !option.is_empty() {
+            options.push(Value::Object(option));
+        }
+    }
+    Some(Value::Array(options))
+}
+
+fn insert_form_question_string(
+    object: &mut serde_json::Map<String, Value>,
+    prefix: &str,
+    name: &str,
+    input: &HashMap<String, String>,
+) {
+    if let Some(value) = input
+        .get(&format!("{prefix}.{name}"))
+        .filter(|value| !value.is_empty())
+    {
+        object.insert(name.to_owned(), Value::String(value.clone()));
+    }
+}
+
+fn insert_form_question_number(
+    object: &mut serde_json::Map<String, Value>,
+    prefix: &str,
+    name: &str,
+    input: &HashMap<String, String>,
+) -> Option<()> {
+    if let Some(value) = input
+        .get(&format!("{prefix}.{name}"))
+        .filter(|value| !value.is_empty())
+    {
+        object.insert(
+            name.to_owned(),
+            serde_json::json!(value.parse::<u64>().ok()?),
+        );
+    }
+    Some(())
+}
+
+fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Option<String> {
+    if input.contains_key(field_name) {
+        return None;
+    }
+    let prefix = format!("{field_name}.");
+    let mut numbers = Vec::new();
+    for key in input.keys().filter(|key| key.starts_with(&prefix)) {
+        let mut parts = key.strip_prefix(&prefix)?.split('.');
+        let number = parts.next()?.parse::<usize>().ok()?;
+        if number >= form::FORM_QUESTIONS_LIMIT.saturating_add(5) {
+            return None;
+        }
+        match parts.next()? {
+            "x" if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") => {}
+            "type" | "label" | "required" | "description" | "content" | "style" | "min_length"
+            | "max_length" | "placeholder" | "min_values" | "max_values"
+                if parts.next().is_none() => {}
+            "options" => {
+                let option = parts.next()?.parse::<usize>().ok()?;
+                if option >= 30 {
+                    return None;
+                }
+                match parts.next()? {
+                    "x" if parts.next().is_none()
+                        && input.get(key).is_some_and(|value| value == "1") => {}
+                    "label" | "value" | "description" if parts.next().is_none() => {}
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+        numbers.push(number);
+    }
+    numbers.sort_unstable();
+    numbers.dedup();
+    if numbers.is_empty() {
+        return None;
+    }
+
+    let mut questions = Vec::new();
+    for number in numbers {
+        let row = format!("{field_name}.{number}");
+        if input
+            .get(&format!("{row}.x"))
+            .is_some_and(|value| value == "1")
+        {
+            continue;
+        }
+        let kind = input.get(&format!("{row}.type"))?.as_str();
+        let label = input
+            .get(&format!("{row}.label"))
+            .map_or("", String::as_str);
+        if kind == "legacy" {
+            if !label.is_empty() {
+                questions.push(Value::String(label.to_owned()));
+            }
+            continue;
+        }
+        let content = input
+            .get(&format!("{row}.content"))
+            .map_or("", String::as_str);
+        let has_options = input.keys().any(|key| {
+            key.starts_with(&format!("{row}.options."))
+                && input.get(key).is_some_and(|value| !value.is_empty())
+        });
+        let has_content = !label.is_empty()
+            || !content.is_empty()
+            || [
+                "description",
+                "min_length",
+                "max_length",
+                "placeholder",
+                "min_values",
+                "max_values",
+            ]
+            .iter()
+            .any(|name| {
+                input
+                    .get(&format!("{row}.{name}"))
+                    .is_some_and(|value| !value.is_empty())
+            })
+            || has_options;
+        if !has_content {
+            continue;
+        }
+        if !matches!(
+            kind,
+            "text"
+                | "string_select"
+                | "user_select"
+                | "role_select"
+                | "mentionable_select"
+                | "channel_select"
+                | "radio_group"
+                | "checkbox_group"
+                | "display"
+        ) {
+            return None;
+        }
+        let mut question = serde_json::Map::new();
+        question.insert("type".to_owned(), Value::String(kind.to_owned()));
+        if kind == "display" {
+            insert_form_question_string(&mut question, &row, "content", input);
+        } else {
+            insert_form_question_string(&mut question, &row, "label", input);
+            insert_form_question_string(&mut question, &row, "description", input);
+            question.insert(
+                "required".to_owned(),
+                Value::Bool(
+                    input
+                        .get(&format!("{row}.required"))
+                        .is_some_and(|value| value == "true"),
+                ),
+            );
+            match kind {
+                "text" => {
+                    insert_form_question_string(&mut question, &row, "style", input);
+                    insert_form_question_string(&mut question, &row, "placeholder", input);
+                    insert_form_question_number(&mut question, &row, "min_length", input)?;
+                    insert_form_question_number(&mut question, &row, "max_length", input)?;
+                }
+                "string_select" | "radio_group" | "checkbox_group" => {
+                    question.insert("options".to_owned(), form_question_options(&row, input)?);
+                    if kind != "radio_group" {
+                        insert_form_question_number(&mut question, &row, "min_values", input)?;
+                        insert_form_question_number(&mut question, &row, "max_values", input)?;
+                    }
+                }
+                "user_select" | "role_select" | "mentionable_select" | "channel_select" => {
+                    insert_form_question_number(&mut question, &row, "min_values", input)?;
+                    insert_form_question_number(&mut question, &row, "max_values", input)?;
+                }
+                _ => return None,
+            }
+        }
+        questions.push(Value::Object(question));
+        if questions.len() > form::FORM_QUESTIONS_LIMIT {
+            return None;
+        }
+    }
+    Some(Value::Array(questions).to_string())
+}
+
+fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<String, String>) {
+    let mut cells = Vec::new();
+    for field in fields {
+        match &field.kind {
+            form::Kind::FormQuestions => {
+                if input.contains_key(&field.name)
+                    || input
+                        .keys()
+                        .any(|key| key.starts_with(&format!("{}.", field.name)))
+                {
+                    cells.push(field.name.clone());
+                }
+            }
+            form::Kind::List(columns)
+                if columns
+                    .iter()
+                    .any(|column| column.kind == form::Kind::FormQuestions) =>
+            {
+                let prefix = format!("{}.", field.name);
+                let mut rows: Vec<usize> = input
+                    .keys()
+                    .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
+                    .collect();
+                rows.sort_unstable();
+                rows.dedup();
+                for row in rows {
+                    for column in columns
+                        .iter()
+                        .filter(|column| column.kind == form::Kind::FormQuestions)
+                    {
+                        let cell = format!("{}{}.", prefix, row);
+                        let cell = format!("{cell}{}", column.name);
+                        if input.contains_key(&cell)
+                            || input.keys().any(|key| key.starts_with(&format!("{cell}.")))
+                        {
+                            cells.push(cell);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    cells.sort_unstable();
+    cells.dedup();
+    for cell in cells {
+        let value = form_questions_json(&cell, input).unwrap_or_else(|| "{".to_owned());
+        input.insert(cell, value);
+    }
+}
+
+fn hours_panel_references_valid(fields: &[form::Field], config: &Value) -> bool {
+    let Some(field) = fields.iter().find(|field| field.name == "hours") else {
+        return true;
+    };
+    let form::Kind::List(columns) = &field.kind else {
+        return true;
+    };
+    if !columns
+        .iter()
+        .any(|column| column.name == "panel" && column.schema["x-ui"]["widget"] == "ticket-panel")
+    {
+        return true;
+    }
+    let Some(hours) = config.get("hours") else {
+        return true;
+    };
+    if hours.is_null() {
+        return true;
+    }
+    let Some(hours) = hours.as_array() else {
+        return false;
+    };
+    let mut panel_counts = HashMap::<&str, usize>::new();
+    for panel in config["panels"].as_array().into_iter().flatten() {
+        if let Some(id) = panel["id"].as_str().filter(|id| !id.is_empty()) {
+            *panel_counts.entry(id).or_default() += 1;
+        }
+    }
+    hours.iter().all(|row| match row.get("panel") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(id)) => panel_counts.get(id.as_str()) == Some(&1),
+        Some(_) => false,
+    })
+}
+
+fn global_timezone_is_valid(config: &Value) -> bool {
+    match config.get("timezone") {
+        None => true,
+        Some(Value::String(timezone)) => timezone.parse::<chrono_tz::Tz>().is_ok(),
+        Some(_) => false,
+    }
+}
+
+fn panel_timezones_are_valid(config: &Value) -> bool {
+    match config.get("panels") {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(panels)) => panels.iter().all(|panel| {
+            let Some(panel) = panel.as_object() else {
+                return false;
+            };
+            match panel.get("timezone") {
+                None | Some(Value::Null) => true,
+                Some(Value::String(timezone)) => timezone.parse::<chrono_tz::Tz>().is_ok(),
+                Some(_) => false,
+            }
+        }),
+        Some(_) => false,
+    }
+}
+
+fn hours_intervals_are_valid(config: &Value) -> bool {
+    match config.get("hours") {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(hours)) => hours.iter().all(|window| {
+            let Some(start) = window.get("start_minute").and_then(Value::as_i64) else {
+                return false;
+            };
+            let Some(end) = window.get("end_minute").and_then(Value::as_i64) else {
+                return false;
+            };
+            start != end
+        }),
+        Some(_) => false,
+    }
+}
+
+fn ticket_hours_error(
+    fields: &[form::Field],
+    config: &Value,
+) -> Option<(&'static str, &'static str)> {
+    let Some(field) = fields.iter().find(|field| field.name == "hours") else {
+        return None;
+    };
+    let form::Kind::List(columns) = &field.kind else {
+        return None;
+    };
+    if !columns
+        .iter()
+        .any(|column| column.name == "panel" && column.schema["x-ui"]["widget"] == "ticket-panel")
+    {
+        return None;
+    }
+    if !global_timezone_is_valid(config) {
+        return Some(("timezone", "hours-invalid-timezone"));
+    }
+    if !panel_timezones_are_valid(config) {
+        return Some(("panels", "hours-invalid-timezone"));
+    }
+    if !hours_panel_references_valid(fields, config) {
+        return Some(("hours", "hours-panel-reference-invalid"));
+    }
+    if !hours_intervals_are_valid(config) {
+        return Some(("hours", "hours-invalid-interval"));
+    }
+    None
+}
+
 #[allow(clippy::too_many_lines)]
 pub(super) async fn save_part(
     State(app): State<App>,
@@ -503,8 +875,14 @@ pub(super) async fn save_part(
                 let current_len = current_list(&data, &module, field)
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len);
+                let nested_question_editor = columns.iter().any(|cell| {
+                    matches!(cell.kind, form::Kind::TextList | form::Kind::FormQuestions)
+                        && column.strip_prefix(&format!("{}.", cell.name)).is_some()
+                });
                 if !role_row_allowed(field, row, current_len)
-                    || (column != "x" && !columns.iter().any(|cell| cell.name == column))
+                    || (column != "x"
+                        && !columns.iter().any(|cell| cell.name == column)
+                        && !nested_question_editor)
                 {
                     return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
                 }
@@ -617,6 +995,7 @@ pub(super) async fn save_part(
         input.insert(format!("role-mode:{cell}"), mode.to_owned());
         role_modes.insert(cell, mode.to_owned());
     }
+    prepare_form_question_inputs(&fields, &mut input);
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
     for field in &fields {
@@ -630,9 +1009,24 @@ pub(super) async fn save_part(
                 form::entries(field, &input),
                 Value::Object(serde_json::Map::new()),
             ),
+            form::Kind::TextList => (
+                form::text_list(field, &input).ok_or_else(|| l.text(keys::FIELD_INVALID)),
+                Value::Array(Vec::new()),
+            ),
+            form::Kind::FormQuestions => (
+                form::parse(field, input.get(&field.name).map_or("", String::as_str))
+                    .ok_or_else(|| l.text(keys::FIELD_INVALID)),
+                Value::Array(Vec::new()),
+            ),
             _ => (Err(String::new()), Value::Null),
         };
-        if matches!(field.kind, form::Kind::List(_) | form::Kind::Entries) {
+        if matches!(
+            field.kind,
+            form::Kind::List(_)
+                | form::Kind::Entries
+                | form::Kind::TextList
+                | form::Kind::FormQuestions
+        ) {
             if input.keys().any(|name| in_field(field, name)) {
                 match read {
                     Ok(value) => {
@@ -641,13 +1035,26 @@ pub(super) async fn save_part(
                         let stored =
                             form::lookup(config, &field.name).filter(|value| !value.is_null());
                         let baseline = form::lookup(effective, &field.name).or(Some(&empty));
-                        let compared = if stored.is_none() {
-                            role_defaults_for_compare(field, &value, baseline, &role_modes, &input)
+                        let should_write = if matches!(
+                            field.kind,
+                            form::Kind::TextList | form::Kind::FormQuestions
+                        ) {
+                            form::text_list_should_write(&value, stored, baseline)
                         } else {
-                            value.clone()
+                            let compared = if stored.is_none() {
+                                role_defaults_for_compare(
+                                    field,
+                                    &value,
+                                    baseline,
+                                    &role_modes,
+                                    &input,
+                                )
+                            } else {
+                                value.clone()
+                            };
+                            should_write_role_field(field, &compared, stored, baseline, &role_modes)
                         };
-                        if should_write_role_field(field, &compared, stored, baseline, &role_modes)
-                        {
+                        if should_write {
                             changes.insert(field.name.clone(), value);
                         }
                     }
@@ -699,6 +1106,32 @@ pub(super) async fn save_part(
             StatusCode::UNPROCESSABLE_ENTITY,
         );
     }
+    if changes
+        .keys()
+        .any(|field| matches!(field.as_str(), "hours" | "panels" | "timezone"))
+    {
+        let mut candidate = data.effective.clone();
+        if form::update(&mut candidate, &module, &changes).is_err() {
+            return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
+        }
+        if let Some((field, message)) =
+            ticket_hours_error(&fields, &candidate["modules"][&module]["config"])
+        {
+            errors.insert(field.to_owned(), vec![l.text(message)]);
+            return render(
+                &app,
+                &headers,
+                &id,
+                &module,
+                part,
+                &data,
+                &input,
+                &errors,
+                false,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            );
+        }
+    }
     if !changes.is_empty() && form::update(&mut data.stored, &module, &changes).is_err() {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, &headers);
     }
@@ -728,8 +1161,13 @@ pub(super) async fn save_part(
                         let path = format!("modules.{module}.config.{}", f.name);
                         issue.path == f.name
                             || issue.path == path
-                            || (matches!(f.kind, form::Kind::List(_) | form::Kind::Entries)
-                                && issue.path.starts_with(&path))
+                            || (matches!(
+                                f.kind,
+                                form::Kind::List(_)
+                                    | form::Kind::Entries
+                                    | form::Kind::TextList
+                                    | form::Kind::FormQuestions
+                            ) && issue.path.starts_with(&path))
                     })
                     .map_or_else(String::new, |f| f.name.clone());
                 errors
@@ -787,6 +1225,143 @@ mod tests {
             }
         });
         form::fields(&module).remove(0)
+    }
+
+    #[test]
+    fn ticket_hours_save_rejects_invalid_time_zones_and_zero_length_windows() {
+        let schema = serde_json::json!({
+            "properties": { "config": { "properties": {
+                "timezone": { "type": "string" },
+                "hours": {
+                    "type": "array",
+                    "items": { "type": "object", "properties": {
+                        "panel": {
+                            "anyOf": [{ "type": "string" }, { "type": "null" }],
+                            "x-ui": { "widget": "ticket-panel" }
+                        },
+                        "start_minute": {
+                            "type": "integer", "minimum": 0, "maximum": 1439,
+                            "x-ui": { "widget": "time-minute", "max": 1439 }
+                        },
+                        "end_minute": {
+                            "type": "integer", "minimum": 0, "maximum": 1440,
+                            "x-ui": { "widget": "time-minute", "max": 1440 }
+                        }
+                    }}
+                },
+                "panels": {
+                    "type": "array",
+                    "items": { "type": "object", "properties": {
+                        "id": { "type": "string" },
+                        "timezone": { "type": "string" }
+                    }}
+                }
+            }}}
+        });
+        let fields = form::fields(&schema);
+        let valid = serde_json::json!({
+            "timezone": "Asia/Tokyo",
+            "hours": [{
+                "panel": "billing",
+                "start_minute": 480,
+                "end_minute": 1020
+            }],
+            "panels": [{ "id": "billing", "timezone": null }]
+        });
+        assert_eq!(ticket_hours_error(&fields, &valid), None);
+
+        let invalid_global_timezone = serde_json::json!({
+            "timezone": "Mars/Olympus",
+            "hours": [{
+                "panel": "billing",
+                "start_minute": 480,
+                "end_minute": 1020
+            }],
+            "panels": [{ "id": "billing", "timezone": null }]
+        });
+        assert_eq!(
+            ticket_hours_error(&fields, &invalid_global_timezone),
+            Some(("timezone", "hours-invalid-timezone"))
+        );
+
+        let invalid_panel_timezone = serde_json::json!({
+            "timezone": "Asia/Tokyo",
+            "hours": [{
+                "panel": "billing",
+                "start_minute": 480,
+                "end_minute": 1020
+            }],
+            "panels": [{ "id": "billing", "timezone": "Mars/Olympus" }]
+        });
+        assert_eq!(
+            ticket_hours_error(&fields, &invalid_panel_timezone),
+            Some(("panels", "hours-invalid-timezone"))
+        );
+
+        let zero_length_window = serde_json::json!({
+            "timezone": "Asia/Tokyo",
+            "hours": [{
+                "panel": "billing",
+                "start_minute": 480,
+                "end_minute": 480
+            }],
+            "panels": [{ "id": "billing", "timezone": null }]
+        });
+        assert_eq!(
+            ticket_hours_error(&fields, &zero_length_window),
+            Some(("hours", "hours-invalid-interval"))
+        );
+    }
+
+    #[test]
+    fn ticket_hours_panel_references_must_resolve_once() {
+        let schema = serde_json::json!({
+            "properties": { "config": { "properties": {
+                "hours": {
+                    "type": "array",
+                    "items": { "type": "object", "properties": {
+                        "panel": {
+                            "anyOf": [{ "type": "string" }, { "type": "null" }],
+                            "x-ui": { "widget": "ticket-panel" }
+                        }
+                    }}
+                },
+                "panels": {
+                    "type": "array",
+                    "items": { "type": "object", "properties": {
+                        "id": { "type": "string" }
+                    }}
+                }
+            }}}
+        });
+        let fields = form::fields(&schema);
+        let valid = serde_json::json!({
+            "hours": [
+                { "panel": "billing" },
+                { "panel": null },
+                { "weekday": "monday" }
+            ],
+            "panels": [{ "id": "billing" }]
+        });
+        assert!(hours_panel_references_valid(&fields, &valid));
+
+        let missing = serde_json::json!({
+            "hours": [{ "panel": "deleted" }],
+            "panels": [{ "id": "billing" }]
+        });
+        assert!(!hours_panel_references_valid(&fields, &missing));
+
+        let duplicate = serde_json::json!({
+            "hours": [{ "panel": "billing" }],
+            "panels": [{ "id": "billing" }, { "id": "billing" }]
+        });
+        assert!(!hours_panel_references_valid(&fields, &duplicate));
+
+        let default_schedule = serde_json::json!({
+            "hours": [{ "panel": null }],
+            "panels": []
+        });
+        assert!(hours_panel_references_valid(&fields, &default_schedule));
     }
 
     #[test]
