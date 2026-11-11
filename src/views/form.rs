@@ -784,11 +784,11 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
 
 /// One row per entry of a list, and one empty row to add the next entry. After a refused save the
 /// rows come back as they were typed.
-fn list_editor(l: Locale<'_>, data: ListEditorData<'_>) -> String {
-    let (current_len, rows) = list_rows(&data);
+fn list_editor(l: Locale<'_>, data: &ListEditorData<'_>) -> String {
+    let (current_len, rows) = list_rows(data);
     let mut out = String::from("<div class=\"list-editor\">");
     for row in &rows {
-        out.push_str(&list_row(l, &data, current_len, row));
+        out.push_str(&list_row(l, data, current_len, row));
     }
     out.push_str("</div>");
     out
@@ -989,7 +989,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 match &field.kind {
                     Kind::List(columns) => list_editor(
                         l,
-                        ListEditorData {
+                        &ListEditorData {
                             field,
                             columns,
                             index,
@@ -1191,7 +1191,7 @@ mod tests {
         ] {
             let html = list_editor(
                 catalogs.locale(tag),
-                ListEditorData {
+                &ListEditorData {
                     field: &field,
                     columns,
                     index: 0,
@@ -1214,7 +1214,7 @@ mod tests {
         non_panel.name = "other".into();
         let legacy_id = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &non_panel,
                 columns: std::slice::from_ref(id),
                 index: 0,
@@ -1233,7 +1233,7 @@ mod tests {
         unknown.name = "<unknown>".into();
         let escaped = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &non_panel,
                 columns: std::slice::from_ref(&unknown),
                 index: 0,
@@ -1259,7 +1259,7 @@ mod tests {
 
         let english = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1278,7 +1278,7 @@ mod tests {
 
         let japanese = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1302,7 +1302,7 @@ mod tests {
 
         let inherited_html = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1318,7 +1318,7 @@ mod tests {
         let empty = json!([{"id": "support", "category": "help", "staff_roles": []}]);
         let empty_html = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1334,7 +1334,7 @@ mod tests {
         let duplicate = json!([{"id": "support", "category": "help", "staff_roles": ["13", "13"]}]);
         let duplicate_html = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1350,7 +1350,7 @@ mod tests {
 
         let missing_directory = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1383,7 +1383,7 @@ mod tests {
         ]);
         let html = list_editor(
             catalogs.locale("en"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1410,7 +1410,7 @@ mod tests {
             let current = rows_with_ids(count);
             let html = list_editor(
                 catalogs.locale("ja"),
-                ListEditorData {
+                &ListEditorData {
                     field: &field,
                     columns: &columns,
                     index: 0,
@@ -1435,7 +1435,7 @@ mod tests {
         let input = HashMap::new();
         let html = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1458,7 +1458,7 @@ mod tests {
         let current = rows_with_ids(101);
         let long_list = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &field,
                 columns: &columns,
                 index: 0,
@@ -1473,7 +1473,7 @@ mod tests {
         let adjacent_current = rows_with_ids(1);
         let adjacent_list = list_editor(
             catalogs.locale("ja"),
-            ListEditorData {
+            &ListEditorData {
                 field: &adjacent_field,
                 columns: &columns,
                 index: 1,
