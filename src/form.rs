@@ -450,10 +450,7 @@ fn field(name: &str, value: &Value) -> Option<Field> {
         }
     } else if ty == "array" && schema["items"]["type"] == "object" {
         Kind::List(columns(&schema["items"])?)
-    } else if ty == "array"
-        && schema["items"]["type"] == "string"
-        && widget == Some("roles")
-    {
+    } else if ty == "array" && schema["items"]["type"] == "string" && widget == Some("roles") {
         Kind::Roles
     } else if ty == "array" && schema["items"]["type"] == "string" {
         // Ids and texts, told apart by commas: a setting is not dropped from the form for being a
@@ -590,12 +587,10 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
         },
         // A dash is a list that is empty on purpose, not one that is left to what it inherits.
         Kind::Words if input.trim() == "-" => Some(json!([])),
-        Kind::Roles if input.trim() == "-" => {
-            field.schema["minItems"]
-                .as_u64()
-                .is_none_or(|min| min == 0)
-                .then(|| json!([]))
-        }
+        Kind::Roles if input.trim() == "-" => field.schema["minItems"]
+            .as_u64()
+            .is_none_or(|min| min == 0)
+            .then(|| json!([])),
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -940,11 +935,19 @@ mod tests {
         };
 
         assert_eq!(
-            columns.iter().find(|column| column.name == "staff_roles").unwrap().kind,
+            columns
+                .iter()
+                .find(|column| column.name == "staff_roles")
+                .unwrap()
+                .kind,
             Kind::Roles
         );
         assert_eq!(
-            columns.iter().find(|column| column.name == "tags").unwrap().kind,
+            columns
+                .iter()
+                .find(|column| column.name == "tags")
+                .unwrap()
+                .kind,
             Kind::Words
         );
 
@@ -973,10 +976,30 @@ mod tests {
         let column = &columns[0];
         let directory = json!({"roles": []});
 
-        assert!(roles_picker(&column.kind, &column.schema, None, Some(&directory)));
-        assert!(roles_picker(&column.kind, &column.schema, Some(&json!(["13", "99"])), Some(&directory)));
-        assert!(!roles_picker(&column.kind, &column.schema, Some(&json!(["13", "13"])), Some(&directory)));
-        assert!(!roles_picker(&column.kind, &column.schema, Some(&json!(["13"])), None));
+        assert!(roles_picker(
+            &column.kind,
+            &column.schema,
+            None,
+            Some(&directory)
+        ));
+        assert!(roles_picker(
+            &column.kind,
+            &column.schema,
+            Some(&json!(["13", "99"])),
+            Some(&directory)
+        ));
+        assert!(!roles_picker(
+            &column.kind,
+            &column.schema,
+            Some(&json!(["13", "13"])),
+            Some(&directory)
+        ));
+        assert!(!roles_picker(
+            &column.kind,
+            &column.schema,
+            Some(&json!(["13"])),
+            None
+        ));
     }
 
     #[test]

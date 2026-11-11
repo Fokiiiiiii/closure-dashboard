@@ -134,7 +134,11 @@ fn default_role_cell_text(
         .get(column)?
         .as_array()?;
     let ids = ids.iter().map(Value::as_str).collect::<Option<Vec<_>>>()?;
-    Some(if ids.is_empty() { "-".to_owned() } else { ids.join(",") })
+    Some(if ids.is_empty() {
+        "-".to_owned()
+    } else {
+        ids.join(",")
+    })
 }
 
 fn role_column<'a>(field: &'a form::Field, name: &str) -> Option<(usize, &'a form::Column)> {
@@ -239,9 +243,9 @@ fn role_mode_sets(field: &form::Field, modes: &HashMap<String, String>) -> bool 
     if role_field(field) {
         modes.get(&field.name).is_some_and(|mode| mode == "set")
     } else {
-        modes.iter().any(|(cell, mode)| {
-            mode == "set" && role_column(field, cell).is_some()
-        })
+        modes
+            .iter()
+            .any(|(cell, mode)| mode == "set" && role_column(field, cell).is_some())
     }
 }
 
@@ -265,9 +269,7 @@ fn unset_default_role_overrides(
         return;
     };
     for field in fields {
-        if role_field(field)
-            && modes.get(&field.name).is_some_and(|mode| mode == "default")
-        {
+        if role_field(field) && modes.get(&field.name).is_some_and(|mode| mode == "default") {
             config.remove(&field.name);
         }
     }
@@ -590,7 +592,11 @@ pub(super) async fn save_part(
         }) else {
             return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
         };
-        let mode = if values[0].trim().is_empty() { "default" } else { "set" };
+        let mode = if values[0].trim().is_empty() {
+            "default"
+        } else {
+            "set"
+        };
         if role_field(field) && mode == "default" {
             input.remove(&cell);
         } else if mode == "default" {
@@ -632,22 +638,16 @@ pub(super) async fn save_part(
                     Ok(value) => {
                         let config = &data.stored["modules"][&module]["config"];
                         let effective = &data.effective["modules"][&module]["config"];
-                        let stored = form::lookup(config, &field.name)
-                            .filter(|value| !value.is_null());
-                        let baseline =
-                            form::lookup(effective, &field.name).or(Some(&empty));
+                        let stored =
+                            form::lookup(config, &field.name).filter(|value| !value.is_null());
+                        let baseline = form::lookup(effective, &field.name).or(Some(&empty));
                         let compared = if stored.is_none() {
                             role_defaults_for_compare(field, &value, baseline, &role_modes, &input)
                         } else {
                             value.clone()
                         };
-                        if should_write_role_field(
-                            field,
-                            &compared,
-                            stored,
-                            baseline,
-                            &role_modes,
-                        ) {
+                        if should_write_role_field(field, &compared, stored, baseline, &role_modes)
+                        {
                             changes.insert(field.name.clone(), value);
                         }
                     }
@@ -814,22 +814,11 @@ mod tests {
             "staff_roles": ["13", "99"]
         }]);
         let submitted = serde_json::json!([{"id": "panel"}]);
-        let modes = HashMap::from([(
-            "panels.0.staff_roles".to_owned(),
-            "default".to_owned(),
-        )]);
-        let input = HashMap::from([(
-            "panels.0.staff_roles".to_owned(),
-            String::new(),
-        )]);
+        let modes = HashMap::from([("panels.0.staff_roles".to_owned(), "default".to_owned())]);
+        let input = HashMap::from([("panels.0.staff_roles".to_owned(), String::new())]);
 
-        let compared = role_defaults_for_compare(
-            &field,
-            &submitted,
-            Some(&baseline),
-            &modes,
-            &input,
-        );
+        let compared =
+            role_defaults_for_compare(&field, &submitted, Some(&baseline), &modes, &input);
         assert_eq!(compared, baseline);
         assert!(!should_write_role_field(
             &field,
@@ -844,10 +833,7 @@ mod tests {
     fn explicit_empty_roles_are_written_even_when_the_effective_value_is_empty() {
         let field = role_list(None);
         let empty = serde_json::json!([{"id": "panel", "staff_roles": []}]);
-        let modes = HashMap::from([(
-            "panels.0.staff_roles".to_owned(),
-            "set".to_owned(),
-        )]);
+        let modes = HashMap::from([("panels.0.staff_roles".to_owned(), "set".to_owned())]);
 
         assert!(should_write_role_field(
             &field,
@@ -866,20 +852,11 @@ mod tests {
             {"id": "second", "staff_roles": ["99"]}
         ]);
         let submitted = serde_json::json!([{"id": "second"}]);
-        let modes = HashMap::from([(
-            "panels.1.staff_roles".to_owned(),
-            "default".to_owned(),
-        )]);
+        let modes = HashMap::from([("panels.1.staff_roles".to_owned(), "default".to_owned())]);
         let input = HashMap::from([("panels.0.x".to_owned(), "1".to_owned())]);
 
         assert_eq!(
-            role_defaults_for_compare(
-                &field,
-                &submitted,
-                Some(&baseline),
-                &modes,
-                &input,
-            ),
+            role_defaults_for_compare(&field, &submitted, Some(&baseline), &modes, &input,),
             submitted
         );
     }
@@ -902,8 +879,15 @@ mod tests {
 
         assert!(role_field(&field));
         assert!(role_mode_sets(&field, &modes));
-        assert!(role_input_value("staff_roles", &field.schema, "set", vec!["13".into(), "99".into()])
-            .is_some_and(|value| value == "13,99"));
+        assert!(
+            role_input_value(
+                "staff_roles",
+                &field.schema,
+                "set",
+                vec!["13".into(), "99".into()]
+            )
+            .is_some_and(|value| value == "13,99")
+        );
     }
 
     #[test]

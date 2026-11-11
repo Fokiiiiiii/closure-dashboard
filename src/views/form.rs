@@ -6,7 +6,10 @@ use crate::{
 };
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
-use std::{collections::{HashMap, HashSet}, fmt::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
 pub(crate) struct FormPage<'a> {
     pub id: &'a str,
@@ -404,12 +407,10 @@ fn roles_controls(
                         && role["managed"] != true
                         && role["name"] != "@everyone"
                 });
-                let label = item
-                    .and_then(|role| role["name"].as_str())
-                    .map_or_else(
-                        || l.with_text(keys::UNKNOWN_ROLE, "id", role_id),
-                        |name| escape(name),
-                    );
+                let label = item.and_then(|role| role["name"].as_str()).map_or_else(
+                    || l.with_text(keys::UNKNOWN_ROLE, "id", role_id),
+                    |name| escape(name),
+                );
                 seen.insert((*role_id).to_owned());
                 let _ = write!(
                     out,
@@ -728,16 +729,14 @@ fn list_editor(
                     .filter(|value| !value.is_null());
                 let mode_name = format!("role_mode:{}", cell.name);
                 let mode_key = format!("role-mode:{}", cell.name);
-                let mode = input
-                    .get(&mode_key)
-                    .map_or(
-                        if column.required || stored_cell.is_some() {
-                            "set"
-                        } else {
-                            "default"
-                        },
-                        String::as_str,
-                    );
+                let mode = input.get(&mode_key).map_or(
+                    if column.required || stored_cell.is_some() {
+                        "set"
+                    } else {
+                        "default"
+                    },
+                    String::as_str,
+                );
                 let text = if mode == "default" {
                     role_value_text(current_cell)
                 } else {
@@ -746,8 +745,9 @@ fn list_editor(
                         .cloned()
                         .unwrap_or_else(|| role_value_text(current_cell))
                 };
-                let picker = form::roles_picker(&column.kind, &column.schema, current_cell, directory)
-                    && role_ids_are_unique(&text);
+                let picker =
+                    form::roles_picker(&column.kind, &column.schema, current_cell, directory)
+                        && role_ids_are_unique(&text);
                 out.push_str(&roles_cell(
                     l,
                     &cell,
@@ -885,9 +885,8 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
         }
         for &index in members {
             let field = &fields[index];
-            let stored_current =
-                form::lookup(&stored["modules"][module]["config"], &field.name)
-                    .filter(|v| !v.is_null());
+            let stored_current = form::lookup(&stored["modules"][module]["config"], &field.name)
+                .filter(|v| !v.is_null());
             let current = stored_current
                 .or_else(|| form::lookup(&effective["modules"][module]["config"], &field.name))
                 .unwrap_or(&Value::Null);
@@ -919,8 +918,7 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
             } else {
                 ""
             };
-            let role_field =
-                field.kind == Kind::Roles && field.schema["x-ui"]["widget"] == "roles";
+            let role_field = field.kind == Kind::Roles && field.schema["x-ui"]["widget"] == "roles";
             let description = escape(field.schema["description"].as_str().unwrap_or(&field.label));
             let heading = if role_field {
                 format!(
@@ -959,7 +957,11 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 let mode_name = format!("role_mode:{}", field.name);
                 let mode_key = format!("role-mode:{}", field.name);
                 let mode = input.get(&mode_key).map_or(
-                    if stored_current.is_some() { "set" } else { "default" },
+                    if stored_current.is_some() {
+                        "set"
+                    } else {
+                        "default"
+                    },
                     String::as_str,
                 );
                 let value = if mode == "default" {
@@ -967,8 +969,9 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
                 } else {
                     input.get(&field.name).unwrap_or(&fallback)
                 };
-                let picker = form::roles_picker(&field.kind, &field.schema, Some(current), directory)
-                    && role_ids_are_unique(value);
+                let picker =
+                    form::roles_picker(&field.kind, &field.schema, Some(current), directory)
+                        && role_ids_are_unique(value);
                 roles_field_widget(
                     l,
                     field,

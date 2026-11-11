@@ -28,47 +28,46 @@ pub(super) fn bot_data(
                 json!({"anyOf": [{"type": "object", "properties": parts}]});
         }
         if fake.rules {
-            schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] =
-                json!({"anyOf": [{"type": "object", "properties": {
-                    "auto_delete": {
-                        "type": "array",
-                        "maxItems": 25,
-                        "items": {
-                            "type": "object",
-                            "required": ["channel", "after"],
-                            "properties": {
-                                "channel": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
-                                "after": {"type": "string", "pattern": "^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
-                                "skip_pinned": {"type": "boolean", "default": true}
-                            }
+            schema["properties"]["modules"]["anyOf"][0]["properties"]["channels"]["properties"]["config"] = json!({"anyOf": [{"type": "object", "properties": {
+                "auto_delete": {
+                    "type": "array",
+                    "maxItems": 25,
+                    "items": {
+                        "type": "object",
+                        "required": ["channel", "after"],
+                        "properties": {
+                            "channel": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+                            "after": {"type": "string", "pattern": "^[0-9]+[smhdw]( *[0-9]+[smhdw])*$"},
+                            "skip_pinned": {"type": "boolean", "default": true}
                         }
-                    },
-                    "texts": {"description": "texts", "x-ui": {"widget": "entries"}},
-                    "keep": {"x-ui": {"widget": "flag-or-roles"}},
-                    "panels": {
-                        "type": "array",
-                        "maxItems": 25,
-                        "items": {
-                            "type": "object",
-                            "required": ["id"],
-                            "properties": {
-                                "id": {"type": "string"},
-                                "category": {"type": "string", "maxLength": 4},
-                                "staff_roles": {
-                                    "type": "array",
-                                    "maxItems": 3,
-                                    "items": {"type": "string"},
-                                    "x-ui": {"widget": "roles"}
-                                }
-                            }
-                        }
-                    },
-                    "staff_roles": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "x-ui": {"widget": "roles"}
                     }
-                }}]});
+                },
+                "texts": {"description": "texts", "x-ui": {"widget": "entries"}},
+                "keep": {"x-ui": {"widget": "flag-or-roles"}},
+                "panels": {
+                    "type": "array",
+                    "maxItems": 25,
+                    "items": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "category": {"type": "string", "maxLength": 4},
+                            "staff_roles": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "items": {"type": "string"},
+                                "x-ui": {"widget": "roles"}
+                            }
+                        }
+                    }
+                },
+                "staff_roles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "x-ui": {"widget": "roles"}
+                }
+            }}]});
         }
         schema["properties"]["timezone"]["anyOf"][0]["description"] =
             json!("<script>description</script>");
@@ -269,12 +268,16 @@ async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
         StatusCode::SEE_OTHER
     );
     let sent = state.lock().unwrap().form_body.clone().unwrap();
-    assert!(sent["modules"]["channels"]["config"]["panels"][0]
-        .get("staff_roles")
-        .is_none());
-    assert!(sent["modules"]["channels"]["config"]
-        .get("staff_roles")
-        .is_none());
+    assert!(
+        sent["modules"]["channels"]["config"]["panels"][0]
+            .get("staff_roles")
+            .is_none()
+    );
+    assert!(
+        sent["modules"]["channels"]["config"]
+            .get("staff_roles")
+            .is_none()
+    );
 
     let explicit_empty = "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&role_mode%3Astaff_roles=set";
     assert_eq!(
