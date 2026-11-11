@@ -300,8 +300,9 @@ fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &V
 }
 
 /// The caption of one column of a list.
-fn column_title(l: Locale<'_>, name: &str) -> String {
+fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
     l.text(match name {
+        "id" if panel => keys::COL_PANEL_ID,
         "channel" => keys::COL_CHANNEL,
         "role" => keys::COL_ROLE,
         "level" => keys::COL_LEVEL,
@@ -513,11 +514,7 @@ fn list_editor(
             let _ = write!(
                 out,
                 "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
-                if field.name == "panels" && column.name == "id" {
-                    l.text(keys::COL_PANEL_ID)
-                } else {
-                    column_title(l, &column.name)
-                },
+                column_title(l, &column.name, field.name == "panels"),
                 control(
                     l,
                     &cell,
