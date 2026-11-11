@@ -81,7 +81,7 @@ fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
 pub(super) fn control(
     l: Locale<'_>,
     field: &Field,
-    index: usize,
+    index: impl std::fmt::Display,
     value: &str,
     directory: Option<&Value>,
     invalid: bool,
@@ -486,7 +486,10 @@ fn list_editor(
                 .any(|(c, text)| !form::is_preset(&c.kind) && !text.is_empty())
     });
     let existing = rows.len();
-    if (rows.len() as u64) < field.schema["maxItems"].as_u64().unwrap_or(25) {
+    if field.schema["maxItems"]
+        .as_u64()
+        .is_none_or(|max| (rows.len() as u64) < max)
+    {
         let blank = columns
             .iter()
             .map(|c| match &c.kind {
@@ -518,7 +521,7 @@ fn list_editor(
                 control(
                     l,
                     &cell,
-                    100_000 + index * 1000 + row * 10 + c,
+                    format!("list-{index}-{row}-{c}"),
                     text,
                     directory,
                     false
@@ -730,6 +733,39 @@ mod tests {
         ]})
     }
 
+    fn id_list(
+        name: &str,
+        max_items: Option<usize>,
+    ) -> (crate::form::Field, Vec<crate::form::Column>) {
+        let mut schema = json!({"type": "array"});
+        if let Some(max_items) = max_items {
+            schema["maxItems"] = json!(max_items);
+        }
+        let column = crate::form::Column {
+            name: "id".into(),
+            kind: crate::form::Kind::String,
+            required: true,
+            schema: json!({"type": "string"}),
+        };
+        (
+            crate::form::Field {
+                name: name.into(),
+                label: name.into(),
+                kind: crate::form::Kind::List(vec![column.clone()]),
+                schema,
+            },
+            vec![column],
+        )
+    }
+
+    fn rows_with_ids(count: usize) -> serde_json::Value {
+        serde_json::Value::Array(
+            (0..count)
+                .map(|index| json!({"id": format!("panel-{index}")}))
+                .collect(),
+        )
+    }
+
     #[test]
     fn a_channel_widget_offers_the_kinds_its_schema_names() {
         let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
@@ -866,5 +902,91 @@ mod tests {
             escaped.contains("<span class=\"list-caption\">&lt;unknown&gt;</span>"),
             "{escaped}"
         );
+    }
+
+    #[test]
+    fn an_unbounded_list_keeps_an_add_row_after_25_and_26_items() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = id_list("panels", None);
+        let input = HashMap::new();
+
+        for count in [25, 26] {
+            let current = rows_with_ids(count);
+            let html = list_editor(
+                catalogs.locale("ja"),
+                &field,
+                &columns,
+                0,
+                &current,
+                &input,
+                None,
+            );
+            assert!(
+                html.contains(&format!("name=\"f.panels.{count}.id\"")),
+                "{count}: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_respects_its_explicit_max_items() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = id_list("panels", Some(25));
+        let current = rows_with_ids(25);
+        let input = HashMap::new();
+        let html = list_editor(
+            catalogs.locale("ja"),
+            &field,
+            &columns,
+            0,
+            &current,
+            &input,
+            None,
+        );
+
+        assert!(html.contains("name=\"f.panels.24.id\""), "{html}");
+        assert!(!html.contains("name=\"f.panels.25.id\""), "{html}");
+    }
+
+    #[test]
+    fn list_control_ids_are_unique_across_long_and_adjacent_lists() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let (field, columns) = id_list("panels", None);
+        let input = HashMap::new();
+        let current = rows_with_ids(101);
+        let long_list = list_editor(
+            catalogs.locale("ja"),
+            &field,
+            &columns,
+            0,
+            &current,
+            &input,
+            None,
+        );
+        let mut adjacent_field = field.clone();
+        adjacent_field.name = "adjacent".into();
+        let adjacent_current = rows_with_ids(1);
+        let adjacent_list = list_editor(
+            catalogs.locale("ja"),
+            &adjacent_field,
+            &columns,
+            1,
+            &adjacent_current,
+            &input,
+            None,
+        );
+        let html = format!("{long_list}{adjacent_list}");
+
+        assert!(html.contains("name=\"f.panels.100.id\""), "{html}");
+        assert!(html.contains("name=\"f.adjacent.0.id\""), "{html}");
+        let mut ids: Vec<_> = html
+            .split("id=\"")
+            .skip(1)
+            .map(|attribute| attribute.split('"').next().unwrap())
+            .collect();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "{html}");
     }
 }
