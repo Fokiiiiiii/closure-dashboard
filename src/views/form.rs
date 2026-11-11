@@ -1269,7 +1269,7 @@ mod tests {
                 directory: Some(&directory),
             },
         );
-        assert!(english.contains("class=\"list-roles\" role=\"group\" aria-labelledby="));
+        assert!(english.contains("class=\"list-cell list-roles\" role=\"group\" aria-labelledby="));
         assert!(english.contains("role=\"radiogroup\""));
         assert!(english.contains("<span class=\"list-caption\">Staff roles</span>"));
         assert!(english.contains("name=\"role_mode:panels.0.staff_roles\" value=\"set\" checked"));
@@ -1346,7 +1346,14 @@ mod tests {
         );
         assert!(duplicate_html.contains("name=\"f.panels.0.staff_roles\" value=\"13, 13\""));
         assert!(duplicate_html.contains("Staff role IDs (comma separated)"));
-        assert!(!duplicate_html.contains("role-option"));
+        let staff_roles_column = columns
+            .iter()
+            .position(|column| column.name == "staff_roles")
+            .unwrap();
+        let duplicate_role_option_id = format!("id=\"field-list-0-0-{staff_roles_column}-role-");
+        let add_row_role_option_id = format!("id=\"field-list-0-1-{staff_roles_column}-role-");
+        assert!(!duplicate_html.contains(&duplicate_role_option_id));
+        assert!(duplicate_html.contains(&add_row_role_option_id));
 
         let missing_directory = list_editor(
             catalogs.locale("en"),
