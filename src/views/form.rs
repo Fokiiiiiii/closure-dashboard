@@ -316,6 +316,10 @@ fn column_title(l: Locale<'_>, name: &str) -> String {
         "id" => keys::COL_ID,
         "label" => keys::COL_LABEL,
         "reason" => keys::COL_REASON,
+        "category" => keys::COL_CATEGORY,
+        "staff_roles" => keys::COL_STAFF_ROLES,
+        "log_channel" => keys::COL_LOG_CHANNEL,
+        "close_after_days" => keys::COL_CLOSE_AFTER_DAYS,
         _ => return escape(name),
     })
 }
@@ -509,7 +513,11 @@ fn list_editor(
             let _ = write!(
                 out,
                 "<label class=\"list-cell\"><span class=\"list-caption\">{}</span>{}</label>",
-                column_title(l, &column.name),
+                if field.name == "panels" && column.name == "id" {
+                    l.text(keys::COL_PANEL_ID)
+                } else {
+                    column_title(l, &column.name)
+                },
                 control(
                     l,
                     &cell,
@@ -710,7 +718,8 @@ pub(crate) fn form_page(l: Locale<'_>, headers: &HeaderMap, data: &FormPage<'_>)
 
 #[cfg(test)]
 mod tests {
-    use super::control;
+    use super::{control, list_editor};
+    use std::collections::HashMap;
 
     fn channel_field(x_ui: &serde_json::Value) -> crate::form::Field {
         let module = json!({"properties": {"config": {"properties": {"category": {"type": "string", "x-ui": x_ui.clone()}}}}});
@@ -766,5 +775,99 @@ mod tests {
         assert_eq!(cell_text(Some(&json!("a"))), "a");
         assert_eq!(cell_text(Some(&json!(true))), "true");
         assert_eq!(cell_text(None), "");
+    }
+
+    #[test]
+    fn ticket_panel_list_columns_render_localized_html_captions() {
+        let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
+        let module = json!({"properties": {"config": {"properties": {"panels": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {"type": "object", "required": ["id"], "properties": {
+                "id": {"type": "string"},
+                "category": {"type": "string"},
+                "staff_roles": {"type": "array", "items": {"type": "string"}},
+                "log_channel": {"type": "string"},
+                "close_after_days": {"type": "integer", "minimum": 0, "maximum": 3650}
+            }}
+        }}}}});
+        let field = crate::form::fields(&module).remove(0);
+        let crate::form::Kind::List(columns) = &field.kind else {
+            panic!("not a list");
+        };
+        let current = json!([{"id": "Panel_A1"}]);
+        let input = HashMap::new();
+
+        for (tag, captions) in [
+            (
+                "en",
+                [
+                    "Panel ID",
+                    "Category",
+                    "Staff role IDs (comma separated)",
+                    "Log channel",
+                    "Close after inactivity (days)",
+                ],
+            ),
+            (
+                "ja",
+                [
+                    "パネルID",
+                    "カテゴリ",
+                    "スタッフロールID（カンマ区切り）",
+                    "ログチャンネル",
+                    "無活動で閉じるまで（日数）",
+                ],
+            ),
+        ] {
+            let html = list_editor(
+                catalogs.locale(tag),
+                &field,
+                columns,
+                0,
+                &current,
+                &input,
+                None,
+            );
+            for caption in captions {
+                assert!(
+                    html.contains(&format!("<span class=\"list-caption\">{caption}</span>")),
+                    "{tag}: {html}"
+                );
+            }
+        }
+
+        let id = columns.iter().find(|column| column.name == "id").unwrap();
+        let mut non_panel = field.clone();
+        non_panel.name = "other".into();
+        let legacy_id = list_editor(
+            catalogs.locale("ja"),
+            &non_panel,
+            std::slice::from_ref(id),
+            0,
+            &current,
+            &input,
+            None,
+        );
+        assert!(
+            legacy_id.contains("<span class=\"list-caption\">名前（英小文字・数字・_ -）</span>"),
+            "{legacy_id}"
+        );
+
+        let mut unknown = id.clone();
+        unknown.name = "<unknown>".into();
+        let escaped = list_editor(
+            catalogs.locale("ja"),
+            &non_panel,
+            std::slice::from_ref(&unknown),
+            0,
+            &current,
+            &input,
+            None,
+        );
+        assert!(
+            escaped.contains("<span class=\"list-caption\">&lt;unknown&gt;</span>"),
+            "{escaped}"
+        );
     }
 }
