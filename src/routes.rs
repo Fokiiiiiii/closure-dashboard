@@ -27,6 +27,7 @@ mod composer;
 mod editor;
 mod modules;
 mod settings;
+mod tickets;
 
 #[derive(Clone)]
 struct App {
@@ -155,6 +156,8 @@ pub fn router(config: Config) -> Router {
         .route("/g/{id}/cases", get(cases::list))
         .route("/g/{id}/cases/export", get(cases::export))
         .route("/g/{id}/cases/note", post(cases::add_note))
+        .route("/g/{id}/tickets", get(tickets::list))
+        .route("/g/{id}/tickets/{channel_id}", get(tickets::one))
         .route(
             "/g/{id}/cases/{number}",
             get(cases::one).post(cases::change),
@@ -299,6 +302,19 @@ fn cases_read(method: &Method, path: &str) -> bool {
             .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
 }
 
+fn tickets_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    let Some((_, rest)) = path.strip_prefix("/g/").and_then(|p| p.split_once('/')) else {
+        return false;
+    };
+    rest == "tickets"
+        || rest
+            .strip_prefix("tickets/")
+            .is_some_and(session::snowflake)
+}
+
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
     // The health check is not held back by a busy dashboard.
     let _place = if request.uri().path() == "/healthz" {
@@ -314,6 +330,7 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     let request_headers = request.headers().clone();
     let path = request.uri().path();
     let read_cases = cases_read(request.method(), path);
+    let read_tickets = tickets_read(request.method(), path);
     let language = lang(request.headers(), &app);
     let public = matches!(path, "/login" | "/app.css" | "/app.js" | "/healthz")
         || path.starts_with("/auth/");
@@ -337,7 +354,9 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
         } else if let Some(actor) = user(request.headers(), &app) {
             match app.api.access(id, &actor).await {
                 Ok((access, _))
-                    if access["allowed"] == true || (read_cases && may_view_cases(&access)) =>
+                    if access["allowed"] == true
+                        || (read_cases && may_view_cases(&access))
+                        || read_tickets =>
                 {
                     run(next, request).await
                 }

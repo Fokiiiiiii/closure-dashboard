@@ -71,6 +71,7 @@ struct Fake {
     structured: bool,
     // A moderator who may read the cases but not change the dashboard.
     viewer: bool,
+    ticket_forbidden: bool,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -189,6 +190,18 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         }
     } else if path.ends_with("/directory") {
         json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path.contains("/tickets") && fake.ticket_forbidden {
+        return (
+            StatusCode::FORBIDDEN,
+            [(header::ETAG, "\"1\"")],
+            "{}".into(),
+        );
+    } else if path.ends_with("/tickets") && query.contains("state=closed") {
+        json!({"tickets":[{"channel_id":"555000000000000004","number":4,"opener":"123","claimed_by":null,"created":1793790842,"state":"closed","closed":1793791000,"closer":"456","reason":"<script>reason</script>","panel":"support"}],"next_before":"4"})
+    } else if path.ends_with("/tickets") {
+        json!({"tickets":[{"channel_id":"555000000000000003","number":3,"opener":"123","claimed_by":"456","created":1793790842,"state":"closing","closed":null,"closer":null,"reason":null,"panel":"support"}],"next_before":"555000000000000003"})
+    } else if path.contains("/tickets/") {
+        json!({"channel_id":"555000000000000003","number":3,"opener":"123","claimed_by":"456","created":1793790842,"state":"closing","closed":null,"closer":null,"reason":null,"panel":"support","transcript":{"pages":[{"index":0,"text":"<script>message</script>"}],"next_page":4,"truncated":true}})
     } else if path.ends_with("/cases/summary") {
         json!({"since":0,"total":3,"by_kind":{"ban":2,"warn":1},"by_source":{"command":3},"by_state":{"active":2,"expired":0,"revoked":1},"daily":[],"moderators":[{"id":"123","count":3}],"targets":[{"id":"555","count":2}],"days":30})
     } else if path.ends_with("/cases/export") {

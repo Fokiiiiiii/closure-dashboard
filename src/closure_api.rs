@@ -426,6 +426,44 @@ impl Api {
     }
     /// # Errors
     /// Returns a sanitized API or transport error.
+    pub async fn tickets(
+        &self,
+        guild: &str,
+        query: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/tickets?{query}"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn ticket(
+        &self,
+        guild: &str,
+        channel_id: &str,
+        start: Option<u32>,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        let page = start.map_or_else(String::new, |start| format!("?start={start}&limit=4"));
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/tickets/{channel_id}{page}"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+
+    /// # Errors
+    /// Returns a sanitized API or transport error.
     pub async fn directory(&self, guild: &str) -> Result<(Value, Option<String>), ApiError> {
         self.request(
             Method::GET,
