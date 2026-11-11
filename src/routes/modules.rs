@@ -82,7 +82,7 @@ fn role_input_value(name: &str, schema: &Value, mode: &str, values: Vec<String>)
         return Some("-".into());
     }
     if values.len() == 1 {
-        return Some(values.into_iter().next()?);
+        return values.into_iter().next();
     }
     let mut role_schema = schema.clone();
     if let Some(object) = role_schema.as_object_mut() {

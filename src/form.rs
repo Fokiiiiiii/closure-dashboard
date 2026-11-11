@@ -550,6 +550,41 @@ pub(crate) fn pattern_matches(pattern: &str, value: &str) -> bool {
     reachable[input.len()]
 }
 
+fn parse_roles(field: &Field, input: &str) -> Option<Value> {
+    // A dash is a list that is empty on purpose, not one that is left to what it inherits.
+    if input.trim() == "-" {
+        return field.schema["minItems"]
+            .as_u64()
+            .is_none_or(|min| min == 0)
+            .then(|| json!([]));
+    }
+    let values: Vec<_> = input
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .collect();
+    if values.is_empty() {
+        return Some(Value::Null);
+    }
+    if values.iter().any(|v| {
+        let digits = v.strip_prefix('+').unwrap_or(v);
+        digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit())
+    }) {
+        return None;
+    }
+    let count = values.len() as u64;
+    if field.schema["minItems"]
+        .as_u64()
+        .is_some_and(|min| count < min)
+        || field.schema["maxItems"]
+            .as_u64()
+            .is_some_and(|max| count > max)
+    {
+        return None;
+    }
+    Some(json!(values))
+}
+
 #[must_use]
 pub fn parse(field: &Field, input: &str) -> Option<Value> {
     if input.is_empty() {
@@ -587,10 +622,6 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
         },
         // A dash is a list that is empty on purpose, not one that is left to what it inherits.
         Kind::Words if input.trim() == "-" => Some(json!([])),
-        Kind::Roles if input.trim() == "-" => field.schema["minItems"]
-            .as_u64()
-            .is_none_or(|min| min == 0)
-            .then(|| json!([])),
         Kind::Words => {
             let values: Vec<_> = input
                 .split(',')
@@ -599,33 +630,7 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
                 .collect();
             (!values.is_empty()).then(|| json!(values))
         }
-        Kind::Roles => {
-            let values: Vec<_> = input
-                .split(',')
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .collect();
-            if values.is_empty() {
-                return Some(Value::Null);
-            }
-            if values.iter().any(|v| {
-                let digits = v.strip_prefix('+').unwrap_or(v);
-                digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit())
-            }) {
-                return None;
-            }
-            let count = values.len() as u64;
-            if field.schema["minItems"]
-                .as_u64()
-                .is_some_and(|min| count < min)
-                || field.schema["maxItems"]
-                    .as_u64()
-                    .is_some_and(|max| count > max)
-            {
-                return None;
-            }
-            Some(json!(values))
-        }
+        Kind::Roles => parse_roles(field, input),
         Kind::String | Kind::Enum(_) => {
             // A text area sends its line breaks as CR LF; the bot keeps plain LF.
             let normalized = input.replace("\r\n", "\n");
@@ -929,8 +934,8 @@ mod tests {
                 "tags": {"type": "array", "items": {"type": "string"}}
             }}
         }}}}});
-        let fields = fields(&module);
-        let Kind::List(columns) = &fields[0].kind else {
+        let panel_fields = fields(&module);
+        let Kind::List(columns) = &panel_fields[0].kind else {
             panic!("not a list");
         };
 
