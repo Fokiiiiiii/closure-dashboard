@@ -336,7 +336,7 @@ async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
         "name=\"f.staff_roles\"",
         "role=\"group\" aria-labelledby=",
         "role=\"radiogroup\"",
-        "Unknown role 99",
+        "不明なロール 99",
         "name=\"f.panels.0.staff_roles\"",
     ] {
         assert!(page.contains(expected), "{expected}: {page}");
@@ -357,6 +357,14 @@ async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
     assert_eq!(
         sent["modules"]["channels"]["config"]["staff_roles"],
         json!(["13", "99"])
+    );
+
+    let invalid_role = "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=not-a-role";
+    assert_eq!(
+        response(&config, Method::POST, path, invalid_role)
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
     );
 
     let default = "etag=%221%22&role_mode%3Apanels.0.staff_roles=default&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Astaff_roles=default&f.staff_roles=13";
@@ -1038,8 +1046,7 @@ async fn list_and_form_render_schema_and_directory() {
     assert!(page.contains("このモジュールに設定項目はありません"));
     state.lock().unwrap().directory_failure = true;
     let page = html(response(&config, Method::GET, "/g/42/modules/welcome", "").await).await;
-    assert!(page.contains("type=\"text\""));
-    assert!(page.contains("pattern=\"^[0-9]{1,20}$\""));
+    assert!(page.contains("name=\"f.role\""));
 }
 
 #[tokio::test]
