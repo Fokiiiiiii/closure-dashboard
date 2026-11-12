@@ -188,7 +188,7 @@ pub(super) async fn page(
         return api_error(&crate::closure_api::ApiError::unavailable(), l, &headers);
     };
     let name = guilds.map_or_else(
-        || id.clone(),
+        |_| id.clone(),
         |(guilds, _)| guild_name(&guilds, &id).to_owned(),
     );
 

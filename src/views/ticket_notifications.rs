@@ -87,7 +87,9 @@ pub(crate) fn ticket_notifications_page(
         );
     }
 
-    let items = state["notifications"].as_array().map_or(&[], Vec::as_slice);
+    let items = state["notifications"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
     if items.is_empty() {
         let _ = write!(
             content,

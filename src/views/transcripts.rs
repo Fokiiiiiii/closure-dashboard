@@ -617,14 +617,13 @@ fn render_transcript_row(
 ) {
     let display = transcript_row_display(l, id, data, ticket);
     body.push_str("<tr>");
-    render_transcript_cells(body, l, data, &display);
+    render_transcript_cells(body, data, &display);
     render_transcript_actions(body, l, action_url, data, ticket, &display);
     body.push_str("</tr>");
 }
 
 fn render_transcript_cells(
     body: &mut String,
-    l: Locale<'_>,
     data: &TranscriptPageData,
     display: &TranscriptRowDisplay,
 ) {
