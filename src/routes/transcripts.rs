@@ -178,7 +178,7 @@ pub(super) async fn page(
         next_before,
         label_cursor: parsed.label_cursor,
         next_label_cursor,
-        filtered_label_etag,
+        label_etag: filtered_label_etag,
         syncing,
         backfill_incomplete,
         can_manage_labels,

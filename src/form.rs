@@ -991,7 +991,7 @@ pub fn rows<S: std::hash::BuildHasher>(
     numbers.sort_unstable();
     numbers.dedup();
     let ordered_access_rules = field.schema["x-ui"]["widget"] == "access-rules";
-    let mut rows = Vec::new();
+    let mut output_rows = Vec::new();
     let mut access_rules = Vec::<(usize, usize, Value)>::new();
     for number in numbers {
         let key = |column: &str| format!("{prefix}{number}.{column}");
@@ -1090,7 +1090,7 @@ pub fn rows<S: std::hash::BuildHasher>(
             })?;
             access_rules.push((order, number, row));
         } else {
-            rows.push(row);
+            output_rows.push(row);
         }
     }
     if ordered_access_rules {
@@ -1102,7 +1102,7 @@ pub fn rows<S: std::hash::BuildHasher>(
             access_rules.into_iter().map(|(_, _, row)| row).collect(),
         ));
     }
-    Some(Value::Array(rows))
+    Some(Value::Array(output_rows))
 }
 
 #[must_use]
