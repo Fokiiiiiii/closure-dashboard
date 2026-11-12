@@ -256,9 +256,7 @@ async fn perform_action(
         }
         let Some(href) = internal_submission_href(
             &state,
-            form.get("notification_id")
-                .map(String::as_str)
-                .unwrap_or(""),
+            form.get("notification_id").map_or("", String::as_str),
         ) else {
             return error_page(StatusCode::NOT_FOUND, l, keys::INVALID, &headers);
         };

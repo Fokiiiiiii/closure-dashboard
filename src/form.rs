@@ -984,10 +984,10 @@ fn validate_row_input<S: std::hash::BuildHasher>(
                 }
                 Kind::NestedList(nested_columns) => {
                     let nested_row = parts.next()?.parse::<usize>().ok()?;
-                    if let Some(maximum) = column.schema["maxItems"].as_u64() {
-                        if u64::try_from(nested_row).ok()? >= maximum {
-                            return None;
-                        }
+                    if let Some(maximum) = column.schema["maxItems"].as_u64()
+                        && u64::try_from(nested_row).ok()? >= maximum
+                    {
+                        return None;
                     }
                     match parts.next() {
                         Some("x")
@@ -1020,9 +1020,9 @@ fn validate_row_input<S: std::hash::BuildHasher>(
     }
 }
 
-fn validate_form_question_input<'a, S: std::hash::BuildHasher>(
+fn validate_form_question_input<S: std::hash::BuildHasher>(
     column: &Column,
-    parts: &mut std::str::Split<'a, char>,
+    parts: &mut std::str::Split<'_, char>,
     key: &str,
     input: &HashMap<String, String, S>,
 ) -> Option<()> {
