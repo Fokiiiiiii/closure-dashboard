@@ -886,10 +886,7 @@ pub fn rows<S: std::hash::BuildHasher>(
     let mut access_rules = Vec::<(usize, usize, Value)>::new();
     for number in numbers {
         let row_marker = format!("{prefix}{number}.x");
-        if input
-            .get(&row_marker)
-            .is_some_and(|value| value == "1")
-        {
+        if input.get(&row_marker).is_some_and(|value| value == "1") {
             continue;
         }
         let row = parse_row_fields(columns, input, &prefix, number)?;
@@ -956,9 +953,7 @@ fn validate_row_input<S: std::hash::BuildHasher>(
     let mut parts = key.strip_prefix(prefix)?.split('.');
     let _row = parts.next()?.parse::<usize>().ok()?;
     match parts.next() {
-        Some("x")
-            if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") =>
-        {
+        Some("x") if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") => {
             Some(())
         }
         Some(name) => {
@@ -1016,9 +1011,7 @@ fn validate_row_input<S: std::hash::BuildHasher>(
                         _ => None,
                     }
                 }
-                Kind::FormQuestions => {
-                    validate_form_question_input(column, &mut parts, key, input)
-                }
+                Kind::FormQuestions => validate_form_question_input(column, &mut parts, key, input),
                 _ if parts.next().is_none() => Some(()),
                 _ => None,
             }
@@ -1047,9 +1040,7 @@ fn validate_form_question_input<'a, S: std::hash::BuildHasher>(
     }
     match parts.next() {
         None => Some(()),
-        Some("x")
-            if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") =>
-        {
+        Some("x") if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") => {
             Some(())
         }
         Some(name) => {
@@ -1080,9 +1071,7 @@ fn validate_form_question_input<'a, S: std::hash::BuildHasher>(
                         Some(())
                     }
                     Some(option_field)
-                        if property["items"]["properties"]
-                            .get(option_field)
-                            .is_some()
+                        if property["items"]["properties"].get(option_field).is_some()
                             && parts.next().is_none() =>
                     {
                         Some(())
@@ -1297,8 +1286,7 @@ pub(crate) fn text_list_should_write(
 ) -> bool {
     let baseline = stored.filter(|value| !value.is_null()).or(effective);
     let baseline = baseline.unwrap_or(&Value::Null);
-    let empty =
-        |value: &Value| value.is_null() || value.as_array().is_some_and(Vec::is_empty);
+    let empty = |value: &Value| value.is_null() || value.as_array().is_some_and(Vec::is_empty);
     !(empty(baseline) && empty(value)) && baseline != value
 }
 
