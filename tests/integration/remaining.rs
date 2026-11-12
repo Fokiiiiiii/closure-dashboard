@@ -470,10 +470,8 @@ async fn ticket_lists_and_details_use_actor_checked_api_data() {
         .await
         .unwrap();
     assert_eq!(open.status(), StatusCode::OK);
-    let page = String::from_utf8(
-        to_bytes(open.into_body(), 1 << 20).await.unwrap().to_vec(),
-    )
-    .unwrap();
+    let page =
+        String::from_utf8(to_bytes(open.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
     assert!(page.contains("#3"));
     assert!(page.contains("state=closed"));
     assert!(page.contains("before=555000000000000003"));
@@ -490,7 +488,10 @@ async fn ticket_lists_and_details_use_actor_checked_api_data() {
         .unwrap();
     assert_eq!(closed.status(), StatusCode::OK);
     let page = String::from_utf8(
-        to_bytes(closed.into_body(), 1 << 20).await.unwrap().to_vec(),
+        to_bytes(closed.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
     )
     .unwrap();
     assert!(page.contains("#4"));
@@ -508,7 +509,10 @@ async fn ticket_lists_and_details_use_actor_checked_api_data() {
         .unwrap();
     assert_eq!(detail.status(), StatusCode::OK);
     let page = String::from_utf8(
-        to_bytes(detail.into_body(), 1 << 20).await.unwrap().to_vec(),
+        to_bytes(detail.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
     )
     .unwrap();
     assert!(page.contains("&lt;script&gt;message&lt;/script&gt;"));
@@ -564,9 +568,10 @@ async fn ticket_lists_and_details_use_actor_checked_api_data() {
             .any(|query| query.contains("start=4294967296"))
     );
     assert!(
-        state.calls.iter().any(|call| {
-            call.0 == "/v1/guilds/42/tickets" && call.3 == "123"
-        }),
+        state
+            .calls
+            .iter()
+            .any(|call| { call.0 == "/v1/guilds/42/tickets" && call.3 == "123" }),
         "the actor is sent to the ticket API"
     );
 }
@@ -580,19 +585,17 @@ async fn ticket_views_reach_the_api_acl_and_keep_guild_scope() {
         fake.ticket_forbidden = true;
     }
     let response = router(config.clone())
-        .oneshot(request(
-            &config,
-            Method::GET,
-            "/g/43/tickets",
-            "",
-        ))
+        .oneshot(request(&config, Method::GET, "/g/43/tickets", ""))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert!(
-        state.lock().unwrap().calls.iter().any(|call| {
-            call.0 == "/v1/guilds/43/tickets" && call.3 == "123"
-        }),
+        state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .any(|call| { call.0 == "/v1/guilds/43/tickets" && call.3 == "123" }),
         "the selected guild and actor reach the ticket API authorization check"
     );
 }
