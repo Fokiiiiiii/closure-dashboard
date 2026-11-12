@@ -111,6 +111,8 @@ form:not(:has(input[name="f.voice_mute_method"][value="role"]:checked)) .when[da
 .list-editor { display:grid; gap:8px; inline-size:100%; }
 .list-row { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:end; padding:10px; border:1px solid var(--line); border-radius:8px; }
 .list-cell { display:grid; gap:4px; flex:1 1 150px; min-inline-size:0; justify-items:start; }
+.list-row:has(> .list-form-questions) > .list-remove { order:1; }
+.list-row:has(> .list-form-questions) > .list-form-questions { order:2; flex-basis:100%; }
 .list-cell select, .list-cell input:not(.switch):not([type=checkbox]) { inline-size:100%; }
 .list-caption { font-size:12px; color:var(--muted); }
 .time-minute-control { display:flex; flex-wrap:wrap; align-items:center; gap:8px; inline-size:100%; min-inline-size:0; }

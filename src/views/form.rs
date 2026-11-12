@@ -279,6 +279,9 @@ pub(super) fn section_title(l: Locale<'_>, key: &str) -> String {
 
 /// The shown text of one choice: translated when it is a value the dashboard knows, else as sent.
 fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
+    if let Some(label) = field.schema["x-enum-labels"][value].as_str() {
+        return l.find(label).unwrap_or_else(|| escape(label));
+    }
     if field.name.rsplit('.').next() == Some("channel_name_scheme") {
         let key = match value {
             "id" => "opt-id",
@@ -633,7 +636,10 @@ fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &V
 }
 
 /// The caption of one column of a list.
-fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
+fn column_title(l: Locale<'_>, name: &str, panel: bool, schema: &Value) -> String {
+    if let Some(title) = schema["title"].as_str() {
+        return l.find(title).unwrap_or_else(|| escape(title));
+    }
     let key = match name {
         "id" if panel => keys::COL_PANEL_ID,
         "name" if panel => "col-panel-name",
@@ -1208,7 +1214,7 @@ fn list_cell_control(
         _ if data.field.name.ends_with(".access_rules") && column.name == "action" => {
             l.text(keys::TICKETS_ACCESS_RULE_ACTION)
         }
-        _ => column_title(l, &column.name, data.field.name == "panels"),
+        _ => column_title(l, &column.name, data.field.name == "panels", &column.schema),
     };
     let mut out = String::new();
     if column.schema["x-ui"]["widget"] == "ticket-panel" {
@@ -1431,7 +1437,7 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
             let _ = write!(
                 out,
                 "<div class=\"list-cell list-text-list\"><span class=\"list-caption\">{}</span>{editor}</div>",
-                column_title(l, &column.name, data.field.name == "panels")
+                column_title(l, &column.name, data.field.name == "panels", &column.schema)
             );
             if uses_schema_descriptions(&data.field.name)
                 && let Some(help) = list_column_description(l, &column.schema)
@@ -1450,7 +1456,7 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
             let _ = write!(
                 out,
                 r#"<div class="list-cell list-form-questions"><span class="list-caption">{}</span>{editor}</div>"#,
-                column_title(l, &column.name, data.field.name == "panels")
+                column_title(l, &column.name, data.field.name == "panels", &column.schema)
             );
             if uses_schema_descriptions(&data.field.name)
                 && let Some(help) = list_column_description(l, &column.schema)
@@ -1464,7 +1470,7 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
                 &cell,
                 &control_index,
                 column,
-                &column_title(l, &column.name, data.field.name == "panels"),
+                &column_title(l, &column.name, data.field.name == "panels", &column.schema),
             ));
         } else {
             out.push_str(&list_cell_control(
