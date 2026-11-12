@@ -508,7 +508,6 @@ pub mod keys {
         TICKETS_WELCOME_FOOTER_TEXT = "tickets-welcome-footer-text",
         TICKETS_WELCOME_FOOTER_ICON_URL = "tickets-welcome-footer-icon-url",
         TICKETS_WELCOME_TIMESTAMP = "tickets-welcome-timestamp",
-        TICKETS_WELCOME_INLINE = "tickets-welcome-inline",
         TICKETS_ACCESS_ROLE_PICKER_UNAVAILABLE = "ticket-access-role-picker-unavailable",
         CONFIG_TICKETS_PANEL_ID = "config-tickets-panel-id",
         CONFIG_TICKETS_PANEL_NAME = "config-tickets-panel-name",

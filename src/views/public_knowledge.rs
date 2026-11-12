@@ -90,7 +90,7 @@ pub(crate) fn public_knowledge_page(
         l.text(keys::PUBLIC_KNOWLEDGE_SEARCH_HINT),
         l.text(keys::PUBLIC_KNOWLEDGE_CATEGORY),
         escape(category),
-        escape(l.text(keys::PUBLIC_KNOWLEDGE_ALL_CATEGORIES))
+        escape(&l.text(keys::PUBLIC_KNOWLEDGE_ALL_CATEGORIES))
     );
     for suggestion in state["categories"]
         .as_array()

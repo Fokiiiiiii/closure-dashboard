@@ -54,7 +54,7 @@ fn cursor_valid(state: &str, value: &str) -> bool {
 }
 
 fn row(body: &mut String, label: String, value: String) {
-    let _ = write!(body, r#"<tr><th>{label}</th><td>{value}</td></tr>"#);
+    let _ = write!(body, r"<tr><th>{label}</th><td>{value}</td></tr>");
 }
 
 pub(crate) fn tickets(
@@ -365,12 +365,12 @@ fn render_transcript_message(body: &mut String, message: &Value, line: &str, con
     body.push_str(
         r#"<article class="card ticket-message"><header class="ticket-message-heading">"#,
     );
-    let _ = write!(body, r#"<strong>{}</strong>"#, escape(author));
+    let _ = write!(body, r"<strong>{}</strong>", escape(author));
     if !author_id.is_empty() {
         let _ = write!(body, " {}", id_text(&author_id));
     }
     if let Some(timestamp) = timestamp {
-        let _ = write!(body, r#"<time>{}</time>"#, escape(timestamp));
+        let _ = write!(body, r"<time>{}</time>", escape(timestamp));
     }
     body.push_str("</header>");
     let _ = write!(
@@ -522,7 +522,7 @@ fn render_message_embeds(body: &mut String, message: &Value) {
             }
         }
         if let Some(footer) = embed["footer"]["text"].as_str() {
-            let _ = write!(body, r#"<footer>{}</footer>"#, escape(footer));
+            let _ = write!(body, r"<footer>{}</footer>", escape(footer));
         }
         body.push_str("</aside>");
     }

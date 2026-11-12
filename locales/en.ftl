@@ -1008,8 +1008,6 @@ ticket-audit-outcome-label = { $outcome ->
     [uncertain] Uncertain
    *[other] { $outcome }
 }
-ticket-audit-resource-label = Resource: { $resource }
-ticket-audit-outcome-label = Result: { $outcome }
 ticket-tags-title = Ticket tags
 ticket-tags-back = Back to tickets
 ticket-tags-search = Search tags

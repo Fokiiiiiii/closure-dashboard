@@ -447,7 +447,7 @@ pub(crate) fn transcripts_page(
             .filter(|score| (1..=5).contains(score))
             .map(|score| format!("{} {score}/5", "★".repeat(score as usize)))
             .unwrap_or_else(|| l.text(keys::TICKET_TRANSCRIPTS_NO_RATING));
-        let closer = ticket["closer"]
+        let closing_staff = ticket["closer"]
             .as_str()
             .map(id_text)
             .unwrap_or_else(|| "—".to_owned());
@@ -458,7 +458,7 @@ pub(crate) fn transcripts_page(
         let panel = panel_display(ticket, &data.panels)
             .map(|name| escape(&name))
             .unwrap_or_else(|| "—".to_owned());
-        let closed = ticket["closed"].as_i64().map_or_else(
+        let closure_time = ticket["closed"].as_i64().map_or_else(
             || "—".to_owned(),
             |time| l.relative_time(time, session::now()),
         );
@@ -487,7 +487,7 @@ pub(crate) fn transcripts_page(
             let _ = write!(body, "<td>{}</td>", escape(&rating));
         }
         if column_visible(data, "closed_by") {
-            let _ = write!(body, "<td>{closer}</td>");
+            let _ = write!(body, "<td>{closing_staff}</td>");
         }
         if column_visible(data, "claimed_by") {
             let _ = write!(body, "<td>{claimed}</td>");
@@ -496,7 +496,7 @@ pub(crate) fn transcripts_page(
             let _ = write!(body, "<td>{panel}</td>");
         }
         if column_visible(data, "closed_at") {
-            let _ = write!(body, "<td>{}</td>", escape(&closed));
+            let _ = write!(body, "<td>{}</td>", escape(&closure_time));
         }
         if column_visible(data, "reason") {
             let _ = write!(body, "<td>{reason_text}</td>");

@@ -119,7 +119,7 @@ pub(super) async fn page(
         (Some(syncing), Some(incomplete), Some(can_manage)) => (syncing, incomplete, can_manage),
         _ => return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers),
     };
-    let label_etag = labels_etag.filter(|etag| valid_etag(etag));
+    let filtered_label_etag = labels_etag.filter(|etag| valid_etag(etag));
     let panels = panel_state
         .ok()
         .and_then(|(state, _)| state["panels"].as_array().cloned())
@@ -128,7 +128,7 @@ pub(super) async fn page(
         .filter(valid_panel_option)
         .collect::<Vec<_>>();
     let name = match guilds {
-        Ok((guilds, _)) => guild_name(&guilds, &id),
+        Ok((guilds, _)) => guild_name(&guilds, &id).to_owned(),
         Err(_) => id.clone(),
     };
 
@@ -154,7 +154,7 @@ pub(super) async fn page(
         }
     }
     let mut label_tokens = views::TranscriptLabelTokens::default();
-    if can_manage_labels && label_etag.is_some() {
+    if can_manage_labels && filtered_label_etag.is_some() {
         label_tokens.create = app.nonces.fresh();
         for label in labels {
             if let Some(label_name) = label["name"].as_str() {
@@ -178,7 +178,7 @@ pub(super) async fn page(
         next_before,
         label_cursor: parsed.label_cursor,
         next_label_cursor,
-        label_etag,
+        filtered_label_etag,
         syncing,
         backfill_incomplete,
         can_manage_labels,
@@ -248,7 +248,7 @@ pub(super) async fn action(
         Ok(labels) => labels,
         Err(_) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
     };
-    if !labels.iter().all(valid_label_name) {
+    if !labels.iter().all(|label| valid_label_name(label)) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
     let mut reason = form.get("reason").map(|reason| reason.trim().to_owned());

@@ -79,7 +79,7 @@ impl ApiError {
             issues,
         }
     }
-    fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, String::new(), Vec::new())
     }
 }

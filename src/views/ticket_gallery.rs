@@ -752,7 +752,7 @@ fn render_preview(body: &mut String, l: Locale<'_>, kind: &str, payload: &Value)
             render_embed_fields(body, &embed["fields"]);
         }
         "form" => {
-            let _ = write!(body, r#"<h3>{}</h3>"#, escape(text(&payload["title"])));
+            let _ = write!(body, r"<h3>{}</h3>", escape(text(&payload["title"])));
             if let Some(questions) = payload["questions"].as_array() {
                 body.push_str("<ol>");
                 for question in questions {

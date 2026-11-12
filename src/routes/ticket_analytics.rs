@@ -69,7 +69,7 @@ fn valid_state(value: &Value, days: u16) -> bool {
     };
     if (1..=5).any(|score| {
         distribution
-            .get(score.to_string())
+            .get(&score.to_string())
             .and_then(Value::as_u64)
             .is_none()
     }) {
@@ -119,7 +119,7 @@ pub(super) async fn page(
     };
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
 
     Html(views::ticket_analytics_page(

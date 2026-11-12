@@ -868,7 +868,6 @@ pub(super) async fn blacklist(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
-    let l = lang(&headers, &app);
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
     };

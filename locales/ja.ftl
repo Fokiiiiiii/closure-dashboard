@@ -990,8 +990,6 @@ ticket-audit-outcome-label = { $outcome ->
     [uncertain] 不明
    *[other] { $outcome }
 }
-ticket-audit-resource-label = 対象: { $resource }
-ticket-audit-outcome-label = 結果: { $outcome }
 ticket-tags-title = チケットタグ
 ticket-tags-back = チケット一覧に戻る
 ticket-tags-search = タグを検索

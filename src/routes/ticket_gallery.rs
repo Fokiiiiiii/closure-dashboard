@@ -6,7 +6,7 @@ use crate::session;
 use axum::Form;
 use serde_json::{Map, Value, json};
 
-const GALLERY_PAGE_SIZE: u32 = 24;
+const GALLERY_PAGE_SIZE: u16 = 24;
 const MAX_GALLERY_OFFSET: u32 = 10_000;
 
 pub(super) async fn browse(
@@ -78,7 +78,7 @@ pub(super) async fn browse(
     }
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
     Html(views::ticket_gallery_page(
         l,
@@ -122,7 +122,7 @@ pub(super) async fn detail(
     };
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
     let default_tag_id = template["title"]
         .as_str()
@@ -170,7 +170,7 @@ pub(super) async fn submissions(
     let guilds = app.api.guilds().await;
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
     Html(views::ticket_gallery_submissions(
         l,
@@ -270,7 +270,7 @@ pub(super) async fn publish(
     }
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
     Html(views::ticket_gallery_publish(
         l,

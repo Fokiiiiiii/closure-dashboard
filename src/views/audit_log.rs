@@ -134,7 +134,7 @@ pub(crate) fn page(
         escape(&title),
         escape(&back)
     );
-    let page_url = format!("/g/{id_html}/tickets/audit-log");
+    let filters_url = format!("/g/{id_html}/tickets/audit-log");
     let action_options = options(
         &l,
         state.get("action_options"),
@@ -161,7 +161,7 @@ pub(crate) fn page(
     );
     let _ = write!(
         body,
-        r#"<section class="card settings-card"><form method="get" action="{page_url}" data-audit-filter><label class="field"><span>{}</span><input type="text" name="user_id" inputmode="numeric" pattern="[0-9]{{1,20}}" maxlength="20" value="{}"></label><label class="field"><span>{}</span><select name="action_type">{action_options}</select></label><label class="field"><span>{}</span><select name="resource_type">{resource_options}</select></label><label class="field"><span>{}</span><select name="outcome">{outcome_options}</select></label><label class="field"><span>{}</span><input type="date" name="date_from" value="{}"></label><label class="field"><span>{}</span><input type="date" name="date_to" value="{}"></label><button class="button secondary" type="submit">{}</button></form></section>"#,
+        r#"<section class="card settings-card"><form method="get" action="{filters_url}" data-audit-filter><label class="field"><span>{}</span><input type="text" name="user_id" inputmode="numeric" pattern="[0-9]{{1,20}}" maxlength="20" value="{}"></label><label class="field"><span>{}</span><select name="action_type">{action_options}</select></label><label class="field"><span>{}</span><select name="resource_type">{resource_options}</select></label><label class="field"><span>{}</span><select name="outcome">{outcome_options}</select></label><label class="field"><span>{}</span><input type="date" name="date_from" value="{}"></label><label class="field"><span>{}</span><input type="date" name="date_to" value="{}"></label><button class="button secondary" type="submit">{}</button></form></section>"#,
         escape(&l.text(keys::TICKET_AUDIT_USER_ID)),
         escape(user_id),
         escape(&l.text(keys::TICKET_AUDIT_ACTION_TYPE)),

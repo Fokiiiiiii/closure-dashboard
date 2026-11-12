@@ -209,7 +209,7 @@ pub(super) async fn page(
     };
     let name = guilds
         .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id))
+        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
         .unwrap_or_else(|| id.clone());
 
     Html(views::audit_log_page(

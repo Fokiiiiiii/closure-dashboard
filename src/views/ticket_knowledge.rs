@@ -1,7 +1,5 @@
 use std::fmt::Write;
 
-use std::fmt::Write;
-
 use axum::http::HeaderMap;
 use serde_json::Value;
 

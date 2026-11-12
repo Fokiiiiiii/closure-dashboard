@@ -50,7 +50,7 @@ fn utc_timestamp(seconds: i64) -> String {
 fn metric(body: &mut String, label: String, value: String) {
     let _ = write!(
         body,
-        r#"<tr><th>{}</th><td>{}</td></tr>"#,
+        r"<tr><th>{}</th><td>{}</td></tr>",
         label,
         escape(&value)
     );
@@ -225,7 +225,7 @@ pub(crate) fn ticket_analytics_page(
     body.push_str("</tbody></table>");
     let _ = write!(
         body,
-        r#"<h3>{}</h3><table><tbody>"#,
+        r"<h3>{}</h3><table><tbody>",
         l.text(keys::TICKET_ANALYTICS_RATING_DISTRIBUTION)
     );
     let distribution = &ratings["distribution"];

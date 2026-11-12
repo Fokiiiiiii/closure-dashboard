@@ -3,6 +3,7 @@ use super::{
     StatusCode, api_error, error_page, guild_name, keys, lang, user,
 };
 use crate::session;
+use crate::views;
 use axum::Form;
 use serde_json::{Value, json};
 
@@ -385,7 +386,11 @@ fn parse_embed(form: &HashMap<String, String>) -> Result<Option<Value>, ()> {
         return Err(());
     }
     let value: Value = serde_json::from_str(text).map_err(|_| ())?;
-    value.as_object().map(|_| Some(value)).ok_or(())
+    if value.is_object() {
+        Ok(Some(value))
+    } else {
+        Err(())
+    }
 }
 
 fn valid_body(body: &str) -> bool {
