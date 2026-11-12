@@ -1596,7 +1596,7 @@ fn text_list_editor(
             out,
             r#"<div class="list-row"><label class="list-cell list-question"><span class="list-caption">{item}</span><textarea id="{}" name="{}" rows="3"{max}{described}>"#,
             escape(&id),
-            escape(&format!("f.{}{row}", field.name)),
+            escape(&format!("f.{}.{row}", field.name)),
         );
         out.push('\n');
         out.push_str(&escape(value));
@@ -1606,7 +1606,7 @@ fn text_list_editor(
                 out,
                 r#"<label class="list-cell list-remove"><span class="list-caption">{}</span><input type="checkbox" name="{}" value="1"{}></label>"#,
                 l.text(keys::COL_REMOVE),
-                escape(&format!("f.{}{row}.x", field.name)),
+                escape(&format!("f.{}.{row}.x", field.name)),
                 if *removed { " checked" } else { "" }
             );
         }
