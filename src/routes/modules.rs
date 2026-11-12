@@ -287,9 +287,28 @@ fn unset_default_role_overrides(
     let Some(config) = config.as_object_mut() else {
         return;
     };
-    for field in fields {
-        if role_field(field) && modes.get(&field.name).is_some_and(|mode| mode == "default") {
+    for (cell, mode) in modes {
+        if mode != "default" {
+            continue;
+        }
+        if let Some(field) = fields
+            .iter()
+            .find(|field| field.name == *cell && role_field(field))
+        {
             config.remove(&field.name);
+            continue;
+        }
+        if let Some(field) = fields
+            .iter()
+            .find(|field| role_column(field, cell).is_some())
+            && let Some((row, column)) = role_column(field, cell)
+            && let Some(row) = config
+                .get_mut(&field.name)
+                .and_then(Value::as_array_mut)
+                .and_then(|rows| rows.get_mut(row))
+                .and_then(Value::as_object_mut)
+        {
+            row.remove(&column.name);
         }
     }
 }

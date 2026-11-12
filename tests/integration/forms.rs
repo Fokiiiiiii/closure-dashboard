@@ -367,7 +367,7 @@ async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
         StatusCode::UNPROCESSABLE_ENTITY
     );
 
-    let default = "etag=%221%22&role_mode%3Apanels.0.staff_roles=default&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Astaff_roles=default&f.staff_roles=13";
+    let default = "etag=%221%22&role_mode%3Apanels.0.staff_roles=default&f.panels.0.id=existing&f.panels.0.category=help&f.panels.0.staff_roles=13&f.panels.0.staff_roles=99&role_mode%3Apanels.1.staff_roles=set&f.panels.1.id=other&f.panels.1.category=help&f.panels.1.staff_roles=13&role_mode%3Astaff_roles=default&f.staff_roles=13";
     assert_eq!(
         response(&config, Method::POST, path, default)
             .await
@@ -384,6 +384,14 @@ async fn nested_panel_roles_keep_set_default_and_duplicate_boundaries() {
         sent["modules"]["channels"]["config"]
             .get("staff_roles")
             .is_none()
+    );
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["panels"][1]["id"],
+        "other"
+    );
+    assert_eq!(
+        sent["modules"]["channels"]["config"]["panels"][1]["staff_roles"],
+        json!(["13"])
     );
 
     let explicit_empty = "etag=%221%22&role_mode%3Apanels.0.staff_roles=set&f.panels.0.id=existing&f.panels.0.category=help&role_mode%3Astaff_roles=set";
