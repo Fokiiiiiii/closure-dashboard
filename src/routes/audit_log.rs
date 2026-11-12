@@ -101,6 +101,10 @@ fn valid_state(value: &Value, page: usize) -> bool {
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Validate filters, query and render the audit page in one route."
+)]
 pub(super) async fn page(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -115,11 +119,7 @@ pub(super) async fn page(
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
 
-    let user_id = query
-        .get("user_id")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
+    let user_id = query.get("user_id").map_or("", String::as_str).trim();
     if !user_id.is_empty()
         && (user_id.len() > 20
             || !user_id.bytes().all(|byte| byte.is_ascii_digit())
@@ -127,21 +127,9 @@ pub(super) async fn page(
     {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
-    let action_type = query
-        .get("action_type")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
-    let resource_type = query
-        .get("resource_type")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
-    let outcome = query
-        .get("outcome")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
+    let action_type = query.get("action_type").map_or("", String::as_str).trim();
+    let resource_type = query.get("resource_type").map_or("", String::as_str).trim();
+    let outcome = query.get("outcome").map_or("", String::as_str).trim();
     if [action_type, resource_type, outcome]
         .iter()
         .any(|value| !value.is_empty() && *value != "all" && !valid_token(value))
@@ -149,16 +137,8 @@ pub(super) async fn page(
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
 
-    let date_from = query
-        .get("date_from")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
-    let date_to = query
-        .get("date_to")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
+    let date_from = query.get("date_from").map_or("", String::as_str).trim();
+    let date_to = query.get("date_to").map_or("", String::as_str).trim();
     let from = if date_from.is_empty() {
         None
     } else {
@@ -207,10 +187,10 @@ pub(super) async fn page(
     let Some(state) = data.get("state").filter(|state| valid_state(state, page)) else {
         return api_error(&crate::closure_api::ApiError::unavailable(), l, &headers);
     };
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
 
     Html(views::audit_log_page(
         l,

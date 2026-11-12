@@ -132,6 +132,10 @@ pub(super) async fn list(
     .into_response()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Validate and dispatch one knowledge action in order."
+)]
 pub(super) async fn action(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -184,17 +188,14 @@ pub(super) async fn action(
             if !valid_title(title) || !valid_body(body) {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
-            let categories = match parse_terms(&form, "categories") {
-                Ok(values) => values,
-                Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+            let Ok(categories) = parse_terms(&form, "categories") else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
-            let keywords = match parse_terms(&form, "keywords") {
-                Ok(values) => values,
-                Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+            let Ok(keywords) = parse_terms(&form, "keywords") else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
-            let custom_embed = match parse_custom_embed(&form) {
-                Ok(value) => value,
-                Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+            let Ok(custom_embed) = parse_custom_embed(&form) else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
             let mut data = json!({ "id": article_id, "title": title, "body": body });
             if let Some(categories) = categories {

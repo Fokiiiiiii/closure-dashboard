@@ -201,8 +201,7 @@ pub(crate) fn public_knowledge_article_page(
         .join("<br>");
     let _ = write!(
         body,
-        r#"<div class="public-knowledge-body">{}</div>"#,
-        article_body
+        r#"<div class="public-knowledge-body">{article_body}</div>"#
     );
     body.push_str("</article></main>");
     page(l, headers, &body)

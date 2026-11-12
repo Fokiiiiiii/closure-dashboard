@@ -53,10 +53,21 @@ fn cursor_valid(state: &str, value: &str) -> bool {
     }
 }
 
-fn row(body: &mut String, label: String, value: String) {
+fn row(body: &mut String, label: &str, value: &str) {
     let _ = write!(body, r"<tr><th>{label}</th><td>{value}</td></tr>");
 }
 
+struct TicketListContext<'a> {
+    id_html: String,
+    list: &'a Value,
+    directory: Option<&'a Value>,
+    state: &'a str,
+    bulk_keys: &'a HashMap<String, String>,
+    can_bulk: bool,
+}
+
+// Keep the route-facing adapter stable; the implementation is split into view helpers.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tickets(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -68,7 +79,36 @@ pub(crate) fn tickets(
     ticket_settings: bool,
     bulk_keys: &HashMap<String, String>,
 ) -> String {
-    let id_html = escape(id);
+    let context = TicketListContext {
+        id_html: escape(id),
+        list,
+        directory,
+        state,
+        bulk_keys,
+        can_bulk: state == "open" && !bulk_keys.is_empty(),
+    };
+    let mut body = ticket_list_header(l, &context, ticket_settings);
+    render_ticket_list_rows(&mut body, l, &context);
+    if context.can_bulk {
+        render_ticket_bulk_actions(&mut body, l);
+    }
+    if context.list["tickets"].as_array().is_none_or(Vec::is_empty) {
+        let _ = write!(
+            body,
+            r#"<p class="empty">{}</p>"#,
+            l.text(keys::TICKETS_NONE)
+        );
+    }
+    render_ticket_list_pagination(&mut body, l, &context);
+    body.push_str("</section>");
+    shell(l, headers, id, name, keys::TICKETS, &body, false)
+}
+
+fn ticket_list_header(
+    l: Locale<'_>,
+    context: &TicketListContext<'_>,
+    ticket_settings: bool,
+) -> String {
     let mut body = format!(
         r#"<header class="page-heading">{}<div class="head-actions">"#,
         heading(l, keys::TICKETS)
@@ -76,38 +116,41 @@ pub(crate) fn tickets(
     if ticket_settings {
         let _ = write!(
             body,
-            r#"<a class="button secondary" href="/g/{id_html}/tickets/settings/blacklist">{}</a>"#,
+            r#"<a class="button secondary" href="/g/{}/tickets/settings/blacklist">{}</a>"#,
+            context.id_html,
             l.text(keys::TICKET_SETTINGS_BLACKLIST)
         );
     }
     let _ = write!(
         body,
-        r#"<a class="button secondary" href="/g/{id_html}/tickets/analytics">{}</a>"#,
+        r#"<a class="button secondary" href="/g/{}/tickets/analytics">{}</a>"#,
+        context.id_html,
         l.text(keys::TICKET_ANALYTICS)
     );
     body.push_str("</div></header>");
     body.push_str(r#"<section class="card panel"><div class="head-actions">"#);
     for (tab, key) in [("open", keys::TICKET_OPEN), ("closed", keys::TICKET_CLOSED)] {
-        let current = if tab == state {
+        let current = if tab == context.state {
             r#" aria-current="page""#
         } else {
             ""
         };
         let _ = write!(
             body,
-            r#"<a class="button secondary" href="/g/{id_html}/tickets?state={tab}"{current}>{}</a>"#,
+            r#"<a class="button secondary" href="/g/{}/tickets?state={tab}"{current}>{}</a>"#,
+            context.id_html,
             l.text(key)
         );
     }
-    let can_bulk = state == "open" && !bulk_keys.is_empty();
-    if can_bulk {
+    if context.can_bulk {
         let _ = write!(
             body,
-            r#"<form method="post" action="/g/{id_html}/tickets/actions"><input type="hidden" name="state" value="open">"#
+            r#"<form method="post" action="/g/{}/tickets/actions"><input type="hidden" name="state" value="open">"#,
+            context.id_html
         );
     }
     body.push_str(r#"</div><div class="table-scroll"><table><thead><tr>"#);
-    if can_bulk {
+    if context.can_bulk {
         let _ = write!(body, "<th>{}</th>", l.text(keys::TICKET_BULK_SELECT));
     }
     for key in [
@@ -121,14 +164,22 @@ pub(crate) fn tickets(
         let _ = write!(body, "<th>{}</th>", l.text(key));
     }
     body.push_str("</tr></thead><tbody>");
-    let tickets = list["tickets"].as_array().map_or(&[][..], Vec::as_slice);
+    body
+}
+
+fn render_ticket_list_rows(body: &mut String, l: Locale<'_>, context: &TicketListContext<'_>) {
+    let tickets = context.list["tickets"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
     for ticket in tickets {
         let number = ticket_number(ticket);
         let channel_id = ticket["channel_id"].as_str().unwrap_or("");
         let ticket_link = if session::snowflake(channel_id) {
             format!(
-                r#"<a href="/g/{id_html}/tickets/{}?state={state}">#{}</a>"#,
+                r#"<a href="/g/{}/tickets/{}?state={}">#{}</a>"#,
+                context.id_html,
                 escape(channel_id),
+                context.state,
                 group_digits(number)
             )
         } else {
@@ -146,10 +197,12 @@ pub(crate) fn tickets(
             || "—".to_owned(),
             |time| l.relative_time(time, session::now()),
         );
-        let channel = channel_name(directory, channel_id).map_or_else(String::new, |name| {
-            format!(r#"<span class="mono">{}</span>"#, escape(name))
-        });
-        let selector = bulk_keys
+        let channel = channel_name(context.directory, channel_id)
+            .map_or_else(String::new, |name| {
+                format!(r#"<span class="mono">{}</span>"#, escape(name))
+            });
+        let selector = context
+            .bulk_keys
             .get(channel_id)
             .and_then(|key| {
                 ticket["revision"].as_i64().map(|revision| {
@@ -169,44 +222,44 @@ pub(crate) fn tickets(
         );
     }
     body.push_str("</tbody></table></div>");
-    if can_bulk {
-        let _ = write!(
-            body,
-            r#"<fieldset class="settings-card"><legend>{}</legend><label class="field"><span>{}</span><select name="action" required><option value="ticket.close">{}</option><option value="ticket.request_close">{}</option><option value="ticket.add_label">{}</option><option value="ticket.remove_label">{}</option></select></label><label class="field"><span>{}</span><textarea name="reason" maxlength="1000" rows="2"></textarea></label><label class="field"><span>{}</span><input name="label" type="text"></label><button class="button" type="submit">{}</button></fieldset></form>"#,
-            l.text(keys::TICKET_BULK_ACTIONS),
-            l.text(keys::TICKET_BULK_ACTION),
-            l.text(keys::TICKET_ACTIONS_CLOSE),
-            l.text(keys::TICKET_ACTIONS_REQUEST_CLOSE),
-            l.text(keys::TICKET_ACTIONS_ADD_LABEL),
-            l.text(keys::TICKET_ACTIONS_REMOVE_LABEL),
-            l.text(keys::TICKET_ACTIONS_REASON),
-            l.text(keys::TICKET_ACTIONS_LABEL),
-            l.text(keys::TICKET_BULK_RUN)
-        );
-    }
-    if tickets.is_empty() {
-        let _ = write!(
-            body,
-            r#"<p class="empty">{}</p>"#,
-            l.text(keys::TICKETS_NONE)
-        );
-    }
-    if let Some(before) = list["next_before"]
+}
+
+fn render_ticket_bulk_actions(body: &mut String, l: Locale<'_>) {
+    let _ = write!(
+        body,
+        r#"<fieldset class="settings-card"><legend>{}</legend><label class="field"><span>{}</span><select name="action" required><option value="ticket.close">{}</option><option value="ticket.request_close">{}</option><option value="ticket.add_label">{}</option><option value="ticket.remove_label">{}</option></select></label><label class="field"><span>{}</span><textarea name="reason" maxlength="1000" rows="2"></textarea></label><label class="field"><span>{}</span><input name="label" type="text"></label><button class="button" type="submit">{}</button></fieldset></form>"#,
+        l.text(keys::TICKET_BULK_ACTIONS),
+        l.text(keys::TICKET_BULK_ACTION),
+        l.text(keys::TICKET_ACTIONS_CLOSE),
+        l.text(keys::TICKET_ACTIONS_REQUEST_CLOSE),
+        l.text(keys::TICKET_ACTIONS_ADD_LABEL),
+        l.text(keys::TICKET_ACTIONS_REMOVE_LABEL),
+        l.text(keys::TICKET_ACTIONS_REASON),
+        l.text(keys::TICKET_ACTIONS_LABEL),
+        l.text(keys::TICKET_BULK_RUN)
+    );
+}
+
+fn render_ticket_list_pagination(
+    body: &mut String,
+    l: Locale<'_>,
+    context: &TicketListContext<'_>,
+) {
+    if let Some(before) = context.list["next_before"]
         .as_str()
-        .filter(|before| cursor_valid(state, before))
+        .filter(|before| cursor_valid(context.state, before))
     {
         let query = escape(
-            &serde_urlencoded::to_string([("state", state), ("before", before)])
+            &serde_urlencoded::to_string([("state", context.state), ("before", before)])
                 .unwrap_or_default(),
         );
         let _ = write!(
             body,
-            r#"<p><a class="button secondary" href="/g/{id_html}/tickets?{query}">{}</a></p>"#,
+            r#"<p><a class="button secondary" href="/g/{}/tickets?{query}">{}</a></p>"#,
+            context.id_html,
             l.text(keys::TICKET_MORE)
         );
     }
-    body.push_str("</section>");
-    shell(l, headers, id, name, keys::TICKETS, &body, false)
 }
 
 pub(crate) fn ticket_bulk_results(
@@ -313,7 +366,7 @@ fn render_transcript_page(body: &mut String, page: &Value, seen_messages: &mut H
         if start < last_end || end <= start || end > chars.len() {
             transcript_plain_segment(body, text);
             return;
-        };
+        }
         ranges.push((message, start, end));
         last_end = end;
     }
@@ -575,20 +628,20 @@ fn render_message_component(body: &mut String, component: &Value, depth: usize) 
     if let Some(placeholder) = component["placeholder"].as_str() {
         let _ = write!(body, "<p>{}</p>", escape(placeholder));
     }
-    if let Some(options) = component["options"].as_array() {
-        if !options.is_empty() {
-            body.push_str("<ul>");
-            for option in options {
-                let label = option["label"].as_str().unwrap_or("");
-                let description = option["description"].as_str();
-                let _ = write!(body, "<li>{}", escape(label));
-                if let Some(description) = description {
-                    let _ = write!(body, " — {}", escape(description));
-                }
-                body.push_str("</li>");
+    if let Some(options) = component["options"].as_array()
+        && !options.is_empty()
+    {
+        body.push_str("<ul>");
+        for option in options {
+            let label = option["label"].as_str().unwrap_or("");
+            let description = option["description"].as_str();
+            let _ = write!(body, "<li>{}", escape(label));
+            if let Some(description) = description {
+                let _ = write!(body, " — {}", escape(description));
             }
-            body.push_str("</ul>");
+            body.push_str("</li>");
         }
+        body.push_str("</ul>");
     }
 }
 
@@ -620,6 +673,23 @@ fn transcript_page_url(
     )
 }
 
+struct TicketPageContext<'a> {
+    id: &'a str,
+    channel_id: &'a str,
+    ticket: &'a Value,
+    directory: Option<&'a Value>,
+    state: &'a str,
+    back_url: &'a str,
+    start: u32,
+    action_state: Option<&'a Value>,
+    action_etag: Option<&'a str>,
+    action_tokens: Option<&'a super::ActionTokens>,
+    action_updated: bool,
+    ticket_settings: bool,
+}
+
+// Keep the route-facing adapter stable; page rendering uses the context below.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ticket(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -637,15 +707,38 @@ pub(crate) fn ticket(
     action_updated: bool,
     ticket_settings: bool,
 ) -> String {
-    let number = ticket_number(ticket);
-    let id_html = escape(id);
-    let mut body = format!(
+    let context = TicketPageContext {
+        id,
+        channel_id,
+        ticket,
+        directory,
+        state,
+        back_url,
+        start,
+        action_state,
+        action_etag,
+        action_tokens,
+        action_updated,
+        ticket_settings,
+    };
+    let mut body = String::new();
+    render_ticket_header(&mut body, l, &context);
+    render_ticket_metadata(&mut body, l, &context);
+    render_ticket_actions(&mut body, l, &context);
+    render_ticket_transcript(&mut body, l, &context);
+    shell(l, headers, id, name, keys::TICKETS, &body, true)
+}
+
+fn render_ticket_header(body: &mut String, l: Locale<'_>, context: &TicketPageContext<'_>) {
+    let id_html = escape(context.id);
+    let _ = write!(
+        body,
         r#"<header class="page-heading"><h1>{}</h1><div class="head-actions"><a class="button secondary" href="{}">{}</a>"#,
-        l.number(keys::TICKET_TITLE, number),
-        escape(back_url),
+        l.number(keys::TICKET_TITLE, ticket_number(context.ticket)),
+        escape(context.back_url),
         l.text(keys::TICKET_BACK)
     );
-    if ticket_settings {
+    if context.ticket_settings {
         let _ = write!(
             body,
             r#"<a class="button secondary" href="/g/{id_html}/tickets/settings/blacklist">{}</a>"#,
@@ -653,15 +746,17 @@ pub(crate) fn ticket(
         );
     }
     body.push_str("</div></header>");
-    if action_updated {
+    if context.action_updated {
         let _ = write!(
             body,
             r#"<p class="form-status" role="status">{}</p>"#,
             l.text(keys::TICKET_ACTIONS_UPDATED)
         );
     }
-    if ticket["state"].as_str() != Some("closed")
-        && (action_state.is_none() || action_etag.is_none() || action_tokens.is_none())
+    if context.ticket["state"].as_str() != Some("closed")
+        && (context.action_state.is_none()
+            || context.action_etag.is_none()
+            || context.action_tokens.is_none())
     {
         let _ = write!(
             body,
@@ -669,120 +764,139 @@ pub(crate) fn ticket(
             l.text(keys::TICKET_ACTIONS_UNAVAILABLE)
         );
     }
+}
+
+fn render_ticket_metadata(body: &mut String, l: Locale<'_>, context: &TicketPageContext<'_>) {
     body.push_str(r#"<section class="card panel"><div class="table-scroll"><table><tbody>"#);
     row(
-        &mut body,
-        l.text(keys::TICKET_STATE),
-        state_label(l, ticket["state"].as_str().unwrap_or("")),
+        body,
+        &l.text(keys::TICKET_STATE),
+        &state_label(l, context.ticket["state"].as_str().unwrap_or("")),
     );
-    let channel = channel_name(directory, channel_id)
-        .map_or_else(|| id_text(channel_id), |name| escape(name));
-    row(&mut body, l.text(keys::TICKET_CHANNEL), channel);
+    let channel = channel_name(context.directory, context.channel_id)
+        .map_or_else(|| id_text(context.channel_id), escape);
+    row(body, &l.text(keys::TICKET_CHANNEL), &channel);
     row(
-        &mut body,
-        l.text(keys::TICKET_OPENER),
-        id_text(ticket["opener"].as_str().unwrap_or("")),
+        body,
+        &l.text(keys::TICKET_OPENER),
+        &id_text(context.ticket["opener"].as_str().unwrap_or("")),
     );
-    if let Some(claimed_by) = ticket["claimed_by"].as_str() {
+    if let Some(claimed_by) = context.ticket["claimed_by"].as_str() {
+        row(body, &l.text(keys::TICKET_CLAIMED_BY), &id_text(claimed_by));
+    }
+    if let Some(panel) = context.ticket["panel"].as_str() {
+        row(body, &l.text(keys::TICKET_PANEL), &escape(panel));
+    }
+    if let Some(created) = context.ticket["created"].as_i64() {
         row(
-            &mut body,
-            l.text(keys::TICKET_CLAIMED_BY),
-            id_text(claimed_by),
+            body,
+            &l.text(keys::TICKET_CREATED),
+            &l.relative_time(created, session::now()),
         );
     }
-    if let Some(panel) = ticket["panel"].as_str() {
-        row(&mut body, l.text(keys::TICKET_PANEL), escape(panel));
-    }
-    if let Some(created) = ticket["created"].as_i64() {
+    if let Some(closed) = context.ticket["closed"].as_i64() {
         row(
-            &mut body,
-            l.text(keys::TICKET_CREATED),
-            l.relative_time(created, session::now()),
+            body,
+            &l.text(keys::TICKET_CLOSED_AT),
+            &l.relative_time(closed, session::now()),
         );
     }
-    if let Some(closed) = ticket["closed"].as_i64() {
-        row(
-            &mut body,
-            l.text(keys::TICKET_CLOSED_AT),
-            l.relative_time(closed, session::now()),
-        );
+    if let Some(closer) = context.ticket["closer"].as_str() {
+        row(body, &l.text(keys::TICKET_CLOSER), &id_text(closer));
     }
-    if let Some(closer) = ticket["closer"].as_str() {
-        row(&mut body, l.text(keys::TICKET_CLOSER), id_text(closer));
-    }
-    if let Some(reason) = ticket["reason"].as_str() {
-        row(&mut body, l.text(keys::TICKET_REASON), escape(reason));
+    if let Some(reason) = context.ticket["reason"].as_str() {
+        row(body, &l.text(keys::TICKET_REASON), &escape(reason));
     }
     body.push_str("</tbody></table></div></section>");
-    if let (Some(action_state), Some(etag), Some(tokens)) =
-        (action_state, action_etag, action_tokens)
-    {
+}
+
+fn render_ticket_actions(body: &mut String, l: Locale<'_>, context: &TicketPageContext<'_>) {
+    if let (Some(action_state), Some(etag), Some(tokens)) = (
+        context.action_state,
+        context.action_etag,
+        context.action_tokens,
+    ) {
         body.push_str(&super::ticket_actions::actions(
             l,
-            id,
-            channel_id,
+            context.id,
+            context.channel_id,
             action_state,
             etag,
             tokens,
         ));
     }
-    if let Some(transcript) = ticket["transcript"].as_object() {
-        if transcript.get("truncated") == Some(&Value::Bool(true)) {
-            let _ = write!(
-                body,
-                r#"<p class="form-status" role="status">{}</p>"#,
-                l.text(keys::TICKET_TRANSCRIPT_TRUNCATED)
-            );
-        }
+}
+
+fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPageContext<'_>) {
+    let Some(transcript) = context.ticket["transcript"].as_object() else {
+        return;
+    };
+    if transcript.get("truncated") == Some(&Value::Bool(true)) {
         let _ = write!(
             body,
-            r#"<section class="card panel"><div class="panel-heading"><h2>{}</h2></div>"#,
-            l.text(keys::TICKET_TRANSCRIPT)
+            r#"<p class="form-status" role="status">{}</p>"#,
+            l.text(keys::TICKET_TRANSCRIPT_TRUNCATED)
         );
-        if let Some(pages) = transcript.get("pages").and_then(Value::as_array) {
-            if pages.is_empty() {
-                transcript_plain_segment(
-                    &mut body,
-                    transcript.get("text").and_then(Value::as_str).unwrap_or(""),
-                );
-            } else {
-                let mut seen_messages = HashSet::new();
-                for page in pages {
-                    render_transcript_page(&mut body, page, &mut seen_messages);
-                }
-            }
-        } else {
+    }
+    let _ = write!(
+        body,
+        r#"<section class="card panel"><div class="panel-heading"><h2>{}</h2></div>"#,
+        l.text(keys::TICKET_TRANSCRIPT)
+    );
+    if let Some(pages) = transcript.get("pages").and_then(Value::as_array) {
+        if pages.is_empty() {
             transcript_plain_segment(
-                &mut body,
+                body,
                 transcript.get("text").and_then(Value::as_str).unwrap_or(""),
             );
+        } else {
+            let mut seen_messages = HashSet::new();
+            for page in pages {
+                render_transcript_page(body, page, &mut seen_messages);
+            }
         }
-        body.push_str(r#"<div class="head-actions">"#);
-        if start > 0 {
-            let previous = start.saturating_sub(4);
-            let previous_url = transcript_page_url(id, channel_id, state, previous, back_url);
-            let _ = write!(
-                body,
-                r#"<a class="button secondary" href="{}">{}</a>"#,
-                escape(&previous_url),
-                l.text(keys::TICKET_TRANSCRIPT_PREVIOUS)
-            );
-        }
-        if let Some(next) = transcript
-            .get("next_page")
-            .and_then(Value::as_u64)
-            .and_then(|next| u32::try_from(next).ok())
-            .filter(|next| *next > start)
-        {
-            let next_url = transcript_page_url(id, channel_id, state, next, back_url);
-            let _ = write!(
-                body,
-                r#"<a class="button secondary" href="{}">{}</a>"#,
-                escape(&next_url),
-                l.text(keys::TICKET_TRANSCRIPT_NEXT)
-            );
-        }
-        body.push_str("</div></section>");
+    } else {
+        transcript_plain_segment(
+            body,
+            transcript.get("text").and_then(Value::as_str).unwrap_or(""),
+        );
     }
-    shell(l, headers, id, name, keys::TICKETS, &body, true)
+    body.push_str(r#"<div class="head-actions">"#);
+    if context.start > 0 {
+        let previous = context.start.saturating_sub(4);
+        let previous_url = transcript_page_url(
+            context.id,
+            context.channel_id,
+            context.state,
+            previous,
+            context.back_url,
+        );
+        let _ = write!(
+            body,
+            r#"<a class="button secondary" href="{}">{}</a>"#,
+            escape(&previous_url),
+            l.text(keys::TICKET_TRANSCRIPT_PREVIOUS)
+        );
+    }
+    if let Some(next) = transcript
+        .get("next_page")
+        .and_then(Value::as_u64)
+        .and_then(|next| u32::try_from(next).ok())
+        .filter(|next| *next > context.start)
+    {
+        let next_url = transcript_page_url(
+            context.id,
+            context.channel_id,
+            context.state,
+            next,
+            context.back_url,
+        );
+        let _ = write!(
+            body,
+            r#"<a class="button secondary" href="{}">{}</a>"#,
+            escape(&next_url),
+            l.text(keys::TICKET_TRANSCRIPT_NEXT)
+        );
+    }
+    body.push_str("</div></section>");
 }

@@ -80,6 +80,10 @@ fn utc_timestamp(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Keep the audit filter values together when constructing pagination links."
+)]
 fn page_url(
     id: &str,
     user_id: &str,
@@ -111,6 +115,11 @@ fn page_url(
     format!("/g/{}/tickets/audit-log?{query}", escape(id))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Render the audit log page and its filters together."
+)]
 pub(crate) fn page(
     l: Locale<'_>,
     headers: &HeaderMap,

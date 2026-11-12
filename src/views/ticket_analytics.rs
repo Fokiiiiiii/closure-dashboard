@@ -9,18 +9,14 @@ use crate::{
 };
 
 fn count(value: &Value) -> String {
-    value
-        .as_u64()
-        .map(group_digits)
-        .unwrap_or_else(|| "—".to_owned())
+    value.as_u64().map_or_else(|| "—".to_owned(), group_digits)
 }
 
 fn average(value: &Value, unit: &str) -> String {
     value
         .as_f64()
         .filter(|number| number.is_finite() && *number >= 0.0)
-        .map(|number| format!("{number:.1} {unit}"))
-        .unwrap_or_else(|| "—".to_owned())
+        .map_or_else(|| "—".to_owned(), |number| format!("{number:.1} {unit}"))
 }
 
 fn utc_timestamp(seconds: i64) -> String {
@@ -47,12 +43,12 @@ fn utc_timestamp(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
 }
 
-fn metric(body: &mut String, label: String, value: String) {
+fn metric(body: &mut String, label: &str, value: &str) {
     let _ = write!(
         body,
         r"<tr><th>{}</th><td>{}</td></tr>",
         label,
-        escape(&value)
+        escape(value)
     );
 }
 
@@ -71,6 +67,10 @@ fn next_url(id: &str, days: u16, cursor: &str) -> String {
     )
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Render the analytics summary and its sections together."
+)]
 pub(crate) fn ticket_analytics_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -124,7 +124,7 @@ pub(crate) fn ticket_analytics_page(
                 ("end", &utc_timestamp(end)),
             ],
         );
-        let _ = write!(body, r#"<p class="settings-help">{}</p>"#, range);
+        let _ = write!(body, r#"<p class="settings-help">{range}</p>"#);
     }
 
     let _ = write!(
@@ -135,18 +135,18 @@ pub(crate) fn ticket_analytics_page(
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_CLOSED),
-        count(&state["closed_count"]),
+        &l.text(keys::TICKET_ANALYTICS_CLOSED),
+        &count(&state["closed_count"]),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_OPEN),
-        count(&state["open_count"]),
+        &l.text(keys::TICKET_ANALYTICS_OPEN),
+        &count(&state["open_count"]),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_RECORDS_SCANNED),
-        count(&state["records_scanned"]),
+        &l.text(keys::TICKET_ANALYTICS_RECORDS_SCANNED),
+        &count(&state["records_scanned"]),
     );
     body.push_str("</tbody></table>");
 
@@ -186,18 +186,18 @@ pub(crate) fn ticket_analytics_page(
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_DURATION_AVERAGE),
-        average(&duration["average_seconds"], "s"),
+        &l.text(keys::TICKET_ANALYTICS_DURATION_AVERAGE),
+        &average(&duration["average_seconds"], "s"),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_DURATION_SAMPLES),
-        count(&duration["samples"]),
+        &l.text(keys::TICKET_ANALYTICS_DURATION_SAMPLES),
+        &count(&duration["samples"]),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_DURATION_MISSING),
-        count(&duration["missing"]),
+        &l.text(keys::TICKET_ANALYTICS_DURATION_MISSING),
+        &count(&duration["missing"]),
     );
     body.push_str("</tbody></table></section>");
 
@@ -209,18 +209,18 @@ pub(crate) fn ticket_analytics_page(
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_RATINGS_AVERAGE),
-        average(&ratings["average"], "★"),
+        &l.text(keys::TICKET_ANALYTICS_RATINGS_AVERAGE),
+        &average(&ratings["average"], "★"),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_RATINGS_COUNT),
-        count(&ratings["count"]),
+        &l.text(keys::TICKET_ANALYTICS_RATINGS_COUNT),
+        &count(&ratings["count"]),
     );
     metric(
         &mut body,
-        l.text(keys::TICKET_ANALYTICS_RATINGS_MISSING),
-        count(&ratings["missing"]),
+        &l.text(keys::TICKET_ANALYTICS_RATINGS_MISSING),
+        &count(&ratings["missing"]),
     );
     body.push_str("</tbody></table>");
     let _ = write!(
@@ -233,8 +233,8 @@ pub(crate) fn ticket_analytics_page(
         let score_text = score.to_string();
         metric(
             &mut body,
-            l.with_text(keys::TICKET_ANALYTICS_RATING_BUCKET, "score", &score_text),
-            count(
+            &l.with_text(keys::TICKET_ANALYTICS_RATING_BUCKET, "score", &score_text),
+            &count(
                 distribution
                     .get(score_text.as_str())
                     .unwrap_or(&Value::Null),

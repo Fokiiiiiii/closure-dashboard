@@ -55,7 +55,8 @@ pub(super) async fn list(
         .get("before")
         .filter(|before| cursor_valid(state, before))
     {
-        asked.push_str(&format!("&before={before}"));
+        asked.push_str("&before=");
+        asked.push_str(before);
     }
     let tickets = match app.api.tickets(&id, &asked, &actor).await {
         Ok((tickets, _)) => tickets,
@@ -84,7 +85,7 @@ pub(super) async fn list(
         Err(error) => return api_error(&error, l, &headers),
     };
     let directory = directory.ok().map(|(directory, _)| directory);
-    let ticket_settings = ticket_panels.ok().is_some_and(|(access, _)| {
+    let ticket_settings = ticket_panels.is_ok_and(|(access, _)| {
         access["can_manage_guild"] == true
             || access["panels"]
                 .as_array()
@@ -142,7 +143,9 @@ pub(super) async fn one(
         Ok((ticket, _)) => ticket,
         Err(error) => return api_error(&error, l, &headers),
     };
-    let action_state = if ticket["state"].as_str() != Some("closed") {
+    let action_state = if ticket["state"].as_str() == Some("closed") {
+        None
+    } else {
         match app
             .api
             .ticket_action_state(&id, "ticket", &channel_id, &actor)
@@ -153,8 +156,6 @@ pub(super) async fn one(
             }
             _ => None,
         }
-    } else {
-        None
     };
     let action_tokens = action_state.as_ref().map(|_| views::ActionTokens {
         close: app.nonces.fresh(),
@@ -173,7 +174,7 @@ pub(super) async fn one(
         Err(error) => return api_error(&error, l, &headers),
     };
     let directory = directory.ok().map(|(directory, _)| directory);
-    let ticket_settings = ticket_panels.ok().is_some_and(|(access, _)| {
+    let ticket_settings = ticket_panels.is_ok_and(|(access, _)| {
         access["can_manage_guild"] == true
             || access["panels"]
                 .as_array()

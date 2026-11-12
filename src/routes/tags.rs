@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 const MAX_ID_CHARS: usize = 16;
 const MAX_BODY_CHARS: usize = 2_000;
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn list(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -144,6 +145,7 @@ pub(super) async fn list(
     .into_response()
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn action(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -223,9 +225,8 @@ pub(super) async fn action(
             {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
-            let embed = match parse_embed(&form) {
-                Ok(embed) => embed,
-                Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+            let Ok(embed) = parse_embed(&form) else {
+                return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             };
             let custom_command_alias = match form.get("custom_command_alias").map(String::as_str) {
                 None | Some("0" | "false" | "off") => false,
@@ -299,9 +300,8 @@ fn preview(
     if !valid_body(body) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
     }
-    let embed = match parse_embed(form) {
-        Ok(embed) => embed,
-        Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers),
+    let Ok(embed) = parse_embed(form) else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
     };
     Html(views::tags_preview(l, body, embed.as_ref())).into_response()
 }
@@ -324,10 +324,8 @@ fn valid_tag_state(state: &Value) -> bool {
                     }))
                 && tag
                     .get("custom_command_alias")
-                    .map_or(true, Value::is_boolean)
-                && tag
-                    .get("alias_sync_pending")
-                    .map_or(true, Value::is_boolean)
+                    .is_none_or(Value::is_boolean)
+                && tag.get("alias_sync_pending").is_none_or(Value::is_boolean)
                 && tag["revision"]
                     .as_i64()
                     .is_some_and(|revision| revision > 0)

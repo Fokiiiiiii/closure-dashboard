@@ -10,7 +10,7 @@ use crate::{
     i18n::{Locale, keys},
 };
 
-const GROUPS: [(i64, &str); 4] = [
+const GROUPS: [(usize, &str); 4] = [
     (0, keys::NOTIFICATIONS_TODAY),
     (1, keys::NOTIFICATIONS_YESTERDAY),
     (2, keys::NOTIFICATIONS_THIS_WEEK),
@@ -20,8 +20,9 @@ const GROUPS: [(i64, &str); 4] = [
 fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |duration| {
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
+        })
 }
 
 fn group_for(timestamp: i64, now: i64) -> usize {
@@ -54,6 +55,7 @@ fn safe_href(value: &str) -> bool {
         && !path.split('/').any(|segment| matches!(segment, "." | ".."))
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn ticket_notifications_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -85,10 +87,7 @@ pub(crate) fn ticket_notifications_page(
         );
     }
 
-    let items = state["notifications"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
+    let items = state["notifications"].as_array().map_or(&[], Vec::as_slice);
     if items.is_empty() {
         let _ = write!(
             content,
@@ -101,8 +100,7 @@ pub(crate) fn ticket_notifications_page(
             let group_items = items
                 .iter()
                 .filter(|item| {
-                    group_for(item["created_at"].as_i64().unwrap_or_default(), now)
-                        == group as usize
+                    group_for(item["created_at"].as_i64().unwrap_or_default(), now) == group
                 })
                 .collect::<Vec<_>>();
             if group_items.is_empty() {
@@ -209,6 +207,7 @@ pub(crate) fn ticket_notifications_page(
     crate::views::page(l, headers, &content)
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn ticket_notification_settings_page(
     l: Locale<'_>,
     headers: &HeaderMap,

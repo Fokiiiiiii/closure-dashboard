@@ -18,7 +18,7 @@ const MAX_LABELS_JSON_BYTES: usize = 131_072;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
-struct TranscriptQuery {
+pub(super) struct TranscriptQuery {
     ticket_id: Option<String>,
     username: Option<String>,
     user_id: Option<String>,
@@ -47,6 +47,7 @@ struct ParsedQuery {
     conflict: bool,
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn page(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -60,9 +61,8 @@ pub(super) async fn page(
     if !session::snowflake(&id) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
-    let parsed = match parse_query(query) {
-        Ok(query) => query,
-        Err(()) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+    let Ok(parsed) = parse_query(query) else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     let asked = list_query(&parsed.filters, parsed.before.as_deref());
     let (tickets, labels, panel_state, guilds) = tokio::join!(
@@ -76,17 +76,15 @@ pub(super) async fn page(
         Ok((value, _)) => value,
         Err(error) => return api_error(&error, l, &headers),
     };
-    let records = match valid_ticket_list(&tickets_value) {
-        Some(records) => records,
-        None => return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers),
+    let Some(records) = valid_ticket_list(&tickets_value) else {
+        return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     };
-    let (total, total_complete, username_truncated) = match (
+    let (Some(total), Some(total_complete), Some(username_truncated)) = (
         tickets_value["total"].as_u64(),
         tickets_value["total_complete"].as_bool(),
         tickets_value["username_truncated"].as_bool(),
-    ) {
-        (Some(total), Some(complete), Some(truncated)) => (total, complete, truncated),
-        _ => return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers),
+    ) else {
+        return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     };
     let next_before = match tickets_value.get("next_before") {
         Some(Value::Null) => None,
@@ -111,13 +109,12 @@ pub(super) async fn page(
         Some(Value::String(cursor)) if valid_label_cursor(cursor) => Some(cursor.clone()),
         _ => return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers),
     };
-    let (syncing, backfill_incomplete, can_manage_labels) = match (
+    let (Some(syncing), Some(backfill_incomplete), Some(can_manage_labels)) = (
         label_state["syncing"].as_bool(),
         label_state["backfill_incomplete"].as_bool(),
         label_state["can_manage_labels"].as_bool(),
-    ) {
-        (Some(syncing), Some(incomplete), Some(can_manage)) => (syncing, incomplete, can_manage),
-        _ => return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers),
+    ) else {
+        return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     };
     let filtered_label_etag = labels_etag.filter(|etag| valid_etag(etag));
     let panels = panel_state
@@ -137,20 +134,18 @@ pub(super) async fn page(
         if let Some(channel_id) = record["channel_id"]
             .as_str()
             .filter(|channel| session::snowflake(channel))
-        {
-            if record["revision"]
+            && record["revision"]
                 .as_i64()
                 .is_some_and(|revision| revision > 0)
-            {
-                row_tokens.insert(
-                    channel_id.to_owned(),
-                    views::TranscriptActionTokens {
-                        reason: app.nonces.fresh(),
-                        add_label: app.nonces.fresh(),
-                        remove_label: app.nonces.fresh(),
-                    },
-                );
-            }
+        {
+            row_tokens.insert(
+                channel_id.to_owned(),
+                views::TranscriptActionTokens {
+                    reason: app.nonces.fresh(),
+                    add_label: app.nonces.fresh(),
+                    remove_label: app.nonces.fresh(),
+                },
+            );
         }
     }
     let mut label_tokens = views::TranscriptLabelTokens::default();
@@ -192,6 +187,7 @@ pub(super) async fn page(
     Html(views::transcripts_page(l, &headers, &id, &name, &page)).into_response()
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn action(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -264,7 +260,7 @@ pub(super) async fn action(
 
     match intent {
         "reason" => {
-            if form.get("reason").is_none() {
+            if !form.contains_key("reason") {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
         }
@@ -499,6 +495,7 @@ fn clean_text(value: Option<String>, max_chars: usize) -> Result<Option<String>,
     Ok(Some(value.to_owned()))
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_query(query: TranscriptQuery) -> Result<ParsedQuery, ()> {
     let ticket_id = clean_text(query.ticket_id, 20)?;
     if ticket_id
@@ -686,20 +683,22 @@ fn safe_return_query(value: Option<&str>) -> ParsedQuery {
         .filter(|value| value.len() <= MAX_RETURN_QUERY_BYTES)
         .and_then(|value| serde_urlencoded::from_str::<TranscriptQuery>(value).ok())
         .and_then(|query| parse_query(query).ok())
-        .map(|mut query| {
-            query.updated = false;
-            query.conflict = false;
-            query
-        })
-        .unwrap_or_else(|| ParsedQuery {
-            filters: views::TranscriptFilters::default(),
-            before: None,
-            previous: Vec::new(),
-            label_cursor: None,
-            manage_labels: false,
-            updated: false,
-            conflict: false,
-        })
+        .map_or_else(
+            || ParsedQuery {
+                filters: views::TranscriptFilters::default(),
+                before: None,
+                previous: Vec::new(),
+                label_cursor: None,
+                manage_labels: false,
+                updated: false,
+                conflict: false,
+            },
+            |mut query| {
+                query.updated = false;
+                query.conflict = false;
+                query
+            },
+        )
 }
 
 fn with_result(id: &str, return_query: &ParsedQuery, result: &str) -> String {

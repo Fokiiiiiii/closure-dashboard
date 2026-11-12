@@ -24,6 +24,7 @@ const PERMISSIONS: [(&str, bool); 10] = [
     ("send_voice_messages", true),
 ];
 
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct TicketSettingsPage<'a> {
     pub id: &'a str,
     pub guild: &'a str,
@@ -263,6 +264,7 @@ fn team_name_max(schema: Option<&Value>) -> u64 {
         .unwrap_or(80)
 }
 
+#[allow(clippy::too_many_lines)]
 fn team_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
     let teams = ticket_config(page.effective)["staff_teams"]
         .as_array()
@@ -308,8 +310,7 @@ fn team_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
         let name = page
             .input
             .get(&format!("{prefix}.name"))
-            .map(String::as_str)
-            .unwrap_or(stored_name);
+            .map_or(stored_name, String::as_str);
         let name_id = format!("team-{index}-name");
         let _ = write!(
             body,
@@ -351,7 +352,7 @@ fn team_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
         let users_key = format!("{prefix}.users");
         let users = values(page.input, &users_key, current.map(|team| &team["users"]));
         let query_key = format!("{prefix}.member_query");
-        let query = page.input.get(&query_key).map(String::as_str).unwrap_or("");
+        let query = page.input.get(&query_key).map_or("", String::as_str);
         let _ = write!(
             body,
             "<div class=\"settings-row\"><span class=\"list-caption\">{}</span><input type=\"hidden\" name=\"{prefix}.users_present\" value=\"1\"><label for=\"team-{index}-member-query\">{}</label><input id=\"team-{index}-member-query\" type=\"search\" name=\"{query_key}\" value=\"{}\" minlength=\"1\" maxlength=\"100\"><button class=\"button secondary\" type=\"submit\" name=\"member_search\" value=\"{index}\">{}</button>",
@@ -465,6 +466,7 @@ fn role_name<'a>(directory: Option<&'a Value>, id: &'a str) -> &'a str {
         .unwrap_or(id)
 }
 
+#[allow(clippy::too_many_lines)]
 fn blacklist_page(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
     let panels = page
         .blacklist_panels
@@ -600,10 +602,7 @@ fn blacklist_page(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
         );
     }
     let query = if page.member_search_kind == Some("blacklist") {
-        page.input
-            .get("member_query")
-            .map(String::as_str)
-            .unwrap_or("")
+        page.input.get("member_query").map_or("", String::as_str)
     } else {
         ""
     };
@@ -688,6 +687,7 @@ fn secret_configured(
         .is_some_and(|secret| secret["configured"] == true)
 }
 
+#[allow(clippy::too_many_lines)]
 fn integration_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
     let Some(schema) = page.integrations_schema else {
         return String::new();

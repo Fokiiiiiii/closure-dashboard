@@ -407,7 +407,9 @@ fn saved_roles(current: &Value, submitted: &TeamRow) -> Option<Vec<Value>> {
     let mut unique = HashSet::new();
     values
         .into_iter()
-        .map(|id| (decimal_snowflake(&id) && unique.insert(id.clone())).then(|| Value::String(id)))
+        .map(|id| {
+            (decimal_snowflake(&id) && unique.insert(id.clone())).then_some(Value::String(id))
+        })
         .collect()
 }
 
@@ -426,7 +428,9 @@ fn saved_users(current: &Value, submitted: &TeamRow) -> Option<Vec<Value>> {
     let mut unique = HashSet::new();
     values
         .into_iter()
-        .map(|id| (decimal_snowflake(&id) && unique.insert(id.clone())).then(|| Value::String(id)))
+        .map(|id| {
+            (decimal_snowflake(&id) && unique.insert(id.clone())).then_some(Value::String(id))
+        })
         .collect()
 }
 
@@ -439,6 +443,7 @@ fn saved_permissions(submitted: &TeamRow) -> Option<Map<String, Value>> {
     Some(permissions)
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn render(
     app: &App,
     headers: &HeaderMap,
@@ -559,6 +564,7 @@ async fn render(
     (status, Html(views::ticket_settings_page(l, headers, &page))).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 async fn load_data(app: &App, headers: &HeaderMap, id: &str) -> Result<modules::Data, Response> {
     let l = lang(headers, app);
     modules::load(app, id, l.bot_language())
@@ -566,6 +572,7 @@ async fn load_data(app: &App, headers: &HeaderMap, id: &str) -> Result<modules::
         .map_err(|error| api_error(&error, l, headers))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn team_form_response(
     app: &App,
     headers: &HeaderMap,
@@ -639,6 +646,7 @@ fn blacklist_scope(
     Some(("panel".into(), id.into()))
 }
 
+#[allow(clippy::result_large_err)]
 async fn load_blacklist_context(
     app: &App,
     headers: &HeaderMap,
@@ -691,6 +699,7 @@ async fn load_blacklist_context(
     })
 }
 
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 fn render_blacklist(
     app: &App,
     headers: &HeaderMap,
@@ -919,6 +928,7 @@ pub(super) async fn blacklist_action_route(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn integration_form_error(
     app: &App,
     headers: &HeaderMap,
@@ -951,6 +961,7 @@ async fn integration_form_error(
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 async fn save_integrations(
     app: &App,
     headers: &HeaderMap,
@@ -1146,6 +1157,7 @@ async fn integration_secret_feedback(
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 async fn integration_secret_action(
     app: &App,
     headers: &HeaderMap,
@@ -1304,6 +1316,7 @@ pub(super) async fn integration_secret_action_route(
     integration_secret_action(&app, &headers, &id, &actor, &intents[0], pairs).await
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn save(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -1428,7 +1441,7 @@ pub(super) async fn save(
             }
         };
     }
-    if !ticket_teams_schema(&data.schema).is_some() {
+    if ticket_teams_schema(&data.schema).is_none() {
         return error_page(StatusCode::NOT_FOUND, l, keys::NOTFOUND, &headers);
     }
     let current = ticket_config(&data.effective)["staff_teams"]
@@ -1778,6 +1791,7 @@ async fn blacklist_search(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn perform_blacklist_action(
     app: &App,
     headers: &HeaderMap,

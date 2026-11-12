@@ -8,6 +8,11 @@ use crate::{
     i18n::{Locale, keys},
 };
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Render the tag list and its filter state together."
+)]
 pub(crate) fn tags_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -198,6 +203,10 @@ pub(crate) fn tags_page(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Keep the tag card fields explicit at the render callsite."
+)]
 fn tag_card(
     l: Locale<'_>,
     guild_id: &str,
@@ -410,8 +419,10 @@ fn article_options(
     {
         let title = selected_title
             .filter(|title| !title.trim().is_empty())
-            .map(escape)
-            .unwrap_or_else(|| l.text(keys::TICKET_TAGS_ARTICLE_UNAVAILABLE).to_owned());
+            .map_or_else(
+                || l.text(keys::TICKET_TAGS_ARTICLE_UNAVAILABLE).clone(),
+                escape,
+            );
         let _ = write!(
             options,
             r#"<option value="{}" selected>{}</option>"#,

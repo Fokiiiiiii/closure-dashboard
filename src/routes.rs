@@ -144,6 +144,7 @@ const REQUEST_TIME: Duration = Duration::from_secs(30);
 ///
 /// # Panics
 /// Panics if the embedded locale registry is invalid.
+#[allow(clippy::too_many_lines)]
 pub fn router(config: Config) -> Router {
     let app = App {
         api: Api::new(&config),
@@ -519,6 +520,7 @@ fn ticket_blacklist_read(method: &Method, path: &str) -> bool {
         .is_some_and(|(_, rest)| rest == "tickets/settings/blacklist")
 }
 
+#[allow(clippy::too_many_lines)]
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
     // The health check is not held back by a busy dashboard.
     let _place = if request.uri().path() == "/healthz" {

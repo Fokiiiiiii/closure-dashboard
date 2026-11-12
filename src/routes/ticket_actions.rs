@@ -121,6 +121,7 @@ pub(super) async fn perform(
 const BULK_ACTION_LIMIT: usize = 50;
 const BULK_ACTION_PARALLELISM: usize = 5;
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn bulk_perform(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -246,7 +247,7 @@ pub(super) async fn bulk_perform(
         l,
         &headers,
         &id,
-        &guild_label,
+        guild_label,
         "open",
         &results,
     ))

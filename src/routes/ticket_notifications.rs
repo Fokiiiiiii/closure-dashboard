@@ -148,6 +148,10 @@ pub(super) async fn settings_action(
     perform_action(app, headers, form, true).await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Validate and dispatch one notification action in order."
+)]
 async fn perform_action(
     app: App,
     headers: HeaderMap,
@@ -158,10 +162,10 @@ async fn perform_action(
     let Some(actor) = user(&headers, &app) else {
         return Redirect::to("/login").into_response();
     };
-    let action = form.get("action").map(String::as_str).unwrap_or("");
-    let etag = form.get("etag").map(String::as_str).unwrap_or("");
-    let key = form.get("key").map(String::as_str).unwrap_or("");
-    let cursor = form.get("cursor").map(String::as_str).unwrap_or("");
+    let action = form.get("action").map_or("", String::as_str);
+    let etag = form.get("etag").map_or("", String::as_str);
+    let key = form.get("key").map_or("", String::as_str);
+    let cursor = form.get("cursor").map_or("", String::as_str);
     if etag.is_empty() || !valid_key(key) || (!cursor.is_empty() && !valid_cursor(cursor)) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
@@ -220,7 +224,7 @@ async fn perform_action(
             if !settings_page || !only_fields(&form, &["code"]) {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }
-            let code = form.get("code").map(|code| code.trim()).unwrap_or("");
+            let code = form.get("code").map_or("", |code| code.trim());
             if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
                 return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
             }

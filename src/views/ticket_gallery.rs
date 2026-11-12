@@ -29,7 +29,7 @@ fn utc_date(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-fn text<'a>(value: &'a Value) -> &'a str {
+fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
 
@@ -100,6 +100,7 @@ fn card(l: Locale<'_>, guild: &str, item: &Value) -> String {
     html
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn ticket_gallery_page(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -367,6 +368,7 @@ pub(crate) fn ticket_gallery_detail(
     )
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn ticket_gallery_submissions(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -454,7 +456,7 @@ pub(crate) fn ticket_gallery_submissions(
                     &revision,
                     &format!("{key}-{submission_id}-withdraw"),
                     "withdraw",
-                    l.text(keys::TICKET_GALLERY_WITHDRAW),
+                    &l.text(keys::TICKET_GALLERY_WITHDRAW),
                 ),
                 "approved" => submission_action_form(
                     &mut body,
@@ -463,7 +465,7 @@ pub(crate) fn ticket_gallery_submissions(
                     &revision,
                     &format!("{key}-{submission_id}-unpublish"),
                     "unpublish",
-                    l.text(keys::TICKET_GALLERY_UNPUBLISH),
+                    &l.text(keys::TICKET_GALLERY_UNPUBLISH),
                 ),
                 _ => {}
             }
@@ -488,7 +490,7 @@ fn submission_action_form(
     revision: &str,
     key: &str,
     action: &str,
-    label: String,
+    label: &str,
 ) {
     let _ = write!(
         body,
@@ -502,6 +504,7 @@ fn submission_action_form(
     );
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn ticket_gallery_publish(
     l: Locale<'_>,
     headers: &HeaderMap,
@@ -537,8 +540,7 @@ pub(crate) fn ticket_gallery_publish(
     let selected = format!("{kind}:{source_id}");
     let _ = write!(
         body,
-        r#"<section class="card panel"><form method="post" action="{}/publish">"#,
-        base
+        r#"<section class="card panel"><form method="post" action="{base}/publish">"#
     );
     if let Some(submission) = submission {
         let _ = write!(
@@ -760,14 +762,14 @@ fn render_preview(body: &mut String, l: Locale<'_>, kind: &str, payload: &Value)
                         .as_str()
                         .unwrap_or_else(|| text(&question["label"]));
                     let _ = write!(body, "<li>{}</li>", escape(label));
-                    if let Some(options) = question["options"].as_array() {
-                        if !options.is_empty() {
-                            body.push_str("<ul>");
-                            for option in options {
-                                let _ = write!(body, "<li>{}</li>", escape(text(&option["label"])));
-                            }
-                            body.push_str("</ul>");
+                    if let Some(options) = question["options"].as_array()
+                        && !options.is_empty()
+                    {
+                        body.push_str("<ul>");
+                        for option in options {
+                            let _ = write!(body, "<li>{}</li>", escape(text(&option["label"])));
                         }
+                        body.push_str("</ul>");
                     }
                 }
                 body.push_str("</ol>");

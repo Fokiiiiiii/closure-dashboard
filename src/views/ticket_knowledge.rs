@@ -42,6 +42,11 @@ fn query_string(cursor: &str, query: &str) -> String {
     serde_urlencoded::to_string(parameters).unwrap_or_default()
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Render the knowledge list and its filter state together."
+)]
 pub(crate) fn ticket_knowledge_page(
     l: Locale<'_>,
     headers: &HeaderMap,

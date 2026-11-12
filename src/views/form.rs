@@ -123,7 +123,7 @@ fn time_minute_control(
     let minutes = parse_time_value(value);
     let end_of_day = max == 1440 && minutes == Some(1440);
     let minute_input = minutes
-        .filter(|minutes| *minutes < 1440 && *minutes <= max.max(0) as u32)
+        .filter(|minutes| *minutes < 1440 && i64::from(*minutes) <= max.max(0))
         .map_or_else(String::new, |minutes| {
             format!("{:02}:{:02}", minutes / 60, minutes % 60)
         });
@@ -662,7 +662,7 @@ fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
         "channel_name_custom" => "tickets-channel-name-custom",
         "open_cooldown_seconds" => "tickets-open-cooldown-seconds",
         "access_rules" if panel => "tickets-access-rules",
-        "role_id" => keys::COL_ROLE,
+        "role_id" | "role" => keys::COL_ROLE,
         "name" => keys::COL_NAME,
         "value" => keys::COL_TEXT,
         "inline" => keys::CP_INLINE,
@@ -672,7 +672,6 @@ fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
         "value_template" => "config-tickets-integration-header-value-template",
         "path" => "config-tickets-integration-mapping-path",
         "channel" => keys::COL_CHANNEL,
-        "role" => keys::COL_ROLE,
         "level" => keys::COL_LEVEL,
         "percent" => keys::COL_PERCENT,
         "after" => keys::COL_AFTER,
@@ -1083,7 +1082,7 @@ fn ticket_teams_control(
     title: &str,
     value: &str,
     directory: Option<&Value>,
-) -> Option<String> {
+) -> String {
     let teams = directory
         .and_then(|directory| directory.get("ticket_staff_teams"))
         .and_then(Value::as_array);
@@ -1143,7 +1142,7 @@ fn ticket_teams_control(
         );
     }
     out.push_str("</div></div>");
-    Some(out)
+    out
 }
 
 fn nested_role_unavailable(
@@ -1219,10 +1218,8 @@ fn list_cell_control(
             out,
             "<label class=\"list-cell\"><span class=\"list-caption\">{title}</span>{panel_control}</label>"
         );
-    } else if column.schema["x-ui"]["widget"] == "ticket-staff-teams"
-        && let Some(control) =
-            ticket_teams_control(l, cell, control_index, &title, text, data.directory)
-    {
+    } else if column.schema["x-ui"]["widget"] == "ticket-staff-teams" {
+        let control = ticket_teams_control(l, cell, control_index, &title, text, data.directory);
         out.push_str(&control);
     } else if column.schema["x-ui"]["widget"] == "role"
         && data.field.name.ends_with(".access_rules")
@@ -1337,6 +1334,7 @@ fn nested_list_editor(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn config_list_editor(
     l: Locale<'_>,
     field: &Field,
@@ -1362,6 +1360,7 @@ pub(crate) fn config_list_editor(
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &ListRow) -> String {
     let prefix = format!("{}.", data.field.name);
     let mut out = String::from("<div class=\"list-row\">");
@@ -1657,7 +1656,8 @@ fn form_question_options_editor(
         .flatten()
         .find(|schema| schema["type"] == "object")
         .and_then(|schema| schema["properties"]["options"]["maxItems"].as_u64())
-        .unwrap_or(25) as usize;
+        .and_then(|max| usize::try_from(max).ok())
+        .unwrap_or(25);
     let existing = original
         .and_then(|value| value["options"].as_array())
         .cloned()
@@ -1732,6 +1732,7 @@ fn form_question_options_editor(
     out
 }
 
+#[allow(clippy::too_many_lines)]
 fn form_questions_editor(
     l: Locale<'_>,
     field: &Field,
@@ -1838,32 +1839,28 @@ fn form_questions_editor(
                 .and_then(Value::as_str)
                 .unwrap_or("paragraph")
         });
-        let min_length = input_value("min_length")
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                form_question_value_text(original.and_then(|question| question.get("min_length")))
-            });
-        let max_length = input_value("max_length")
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                form_question_value_text(original.and_then(|question| question.get("max_length")))
-            });
+        let min_length = input_value("min_length").map_or_else(
+            || form_question_value_text(original.and_then(|question| question.get("min_length"))),
+            str::to_owned,
+        );
+        let max_length = input_value("max_length").map_or_else(
+            || form_question_value_text(original.and_then(|question| question.get("max_length"))),
+            str::to_owned,
+        );
         let placeholder = input_value("placeholder").unwrap_or_else(|| {
             original
                 .and_then(|question| question.get("placeholder"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
         });
-        let min_values = input_value("min_values")
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                form_question_value_text(original.and_then(|question| question.get("min_values")))
-            });
-        let max_values = input_value("max_values")
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                form_question_value_text(original.and_then(|question| question.get("max_values")))
-            });
+        let min_values = input_value("min_values").map_or_else(
+            || form_question_value_text(original.and_then(|question| question.get("min_values"))),
+            str::to_owned,
+        );
+        let max_values = input_value("max_values").map_or_else(
+            || form_question_value_text(original.and_then(|question| question.get("max_values"))),
+            str::to_owned,
+        );
         let removed = input
             .get(&format!("{row_prefix}.x"))
             .is_some_and(|value| value == "1");
@@ -2408,6 +2405,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn ticket_hours_and_panel_questions_roles_render_together() {
         let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
         let locale = catalogs.locale("en");
@@ -2573,6 +2571,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn ticket_panel_list_columns_render_localized_html_captions() {
         let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
         let module = json!({"properties": {"config": {"properties": {"panels": {
@@ -2916,6 +2915,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn text_lists_render_without_role_columns_and_limit_error_rows() {
         let catalogs = crate::i18n::Catalogs::new(crate::i18n::REGISTRY).unwrap();
         let question = serde_json::json!({

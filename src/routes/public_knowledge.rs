@@ -83,7 +83,7 @@ pub(super) async fn list(
                 && state["categories"].is_array()
                 && (state
                     .get("next_cursor")
-                    .map_or(true, |cursor| cursor.is_null() || cursor.is_string()))
+                    .is_none_or(|cursor| cursor.is_null() || cursor.is_string()))
         })
     else {
         return api_error(&ApiError::unavailable(), l, &headers);

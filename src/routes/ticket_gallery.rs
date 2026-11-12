@@ -30,24 +30,23 @@ pub(super) async fn browse(
     {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
-    let q = query.get("q").map(String::as_str).unwrap_or("").trim();
+    let q = query.get("q").map_or("", String::as_str).trim();
     if q.chars().count() > 100 || q.chars().any(char::is_control) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
-    let kind = match query.get("kind").map(String::as_str).unwrap_or("all") {
+    let kind = match query.get("kind").map_or("all", String::as_str) {
         "all" => None,
         kind @ ("panel" | "tag" | "form") => Some(kind),
         _ => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
     };
-    let category = match query.get("category").map(String::as_str).unwrap_or("all") {
+    let category = match query.get("category").map_or("all", String::as_str) {
         "all" => None,
         category @ ("support" | "moderation" | "sales" | "applications" | "feedback"
         | "general" | "other") => Some(category),
         _ => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
     };
-    let sort = match query.get("sort").map(String::as_str).unwrap_or("newest") {
-        sort @ ("newest" | "popular") => sort,
-        _ => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
+    let sort @ ("newest" | "popular") = query.get("sort").map_or("newest", String::as_str) else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     let offset = match query.get("offset") {
         None => 0,
@@ -76,10 +75,10 @@ pub(super) async fn browse(
     if !valid_gallery_page(&data, offset) {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     }
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.ok().map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
     Html(views::ticket_gallery_page(
         l,
         &headers,
@@ -120,10 +119,10 @@ pub(super) async fn detail(
     else {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     };
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.ok().map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
     let default_tag_id = template["title"]
         .as_str()
         .map(default_tag_id)
@@ -168,10 +167,10 @@ pub(super) async fn submissions(
         return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     }
     let guilds = app.api.guilds().await;
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.ok().map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
     Html(views::ticket_gallery_submissions(
         l,
         &headers,
@@ -259,19 +258,22 @@ pub(super) async fn publish(
             return error_page(StatusCode::NOT_FOUND, l, keys::INVALID, &headers);
         };
         if kind.is_empty() {
-            kind = row["kind"].as_str().unwrap_or_default().to_owned();
+            row["kind"]
+                .as_str()
+                .unwrap_or_default()
+                .clone_into(&mut kind);
         }
         Some(row.clone())
     } else {
         None
     };
     if kind.is_empty() {
-        kind = "panel".to_owned();
+        kind.push_str("panel");
     }
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.ok().map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
     Html(views::ticket_gallery_publish(
         l,
         &headers,
@@ -287,6 +289,7 @@ pub(super) async fn publish(
     .into_response()
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn publish_post(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -321,7 +324,7 @@ pub(super) async fn publish_post(
     let Some(source) = form.get("source").map(String::as_str) else {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
-    let Some((kind, source_id)) = source.split_once(":") else {
+    let Some((kind, source_id)) = source.split_once(':') else {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     if !matches!(kind, "panel" | "tag" | "form") || !valid_source_id(source_id) {
@@ -355,11 +358,7 @@ pub(super) async fn publish_post(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let author_name = form
-        .get("author_name")
-        .map(String::as_str)
-        .unwrap_or("")
-        .trim();
+    let author_name = form.get("author_name").map_or("", String::as_str).trim();
     if tags.len() > 3
         || tags.iter().any(|tag| !valid_text(tag, 24))
         || author_name.chars().count() > 80
@@ -428,6 +427,7 @@ pub(super) async fn publish_post(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn import(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -684,7 +684,7 @@ fn valid_submission(value: &Value) -> bool {
 }
 
 fn valid_template_id(value: &str) -> bool {
-    value.parse::<i64>().ok().is_some_and(|id| id > 0)
+    value.parse::<i64>().is_ok_and(|id| id > 0)
 }
 
 fn valid_source_id(value: &str) -> bool {

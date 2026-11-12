@@ -52,6 +52,8 @@ pub(crate) struct TranscriptLabelTokens {
     pub delete: HashMap<String, String>,
 }
 
+// Independent view-state flags keep the list and manager notices explicit.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 pub(crate) struct TranscriptPageData {
     pub records: Vec<Value>,
@@ -85,10 +87,22 @@ pub(crate) fn transcripts_page(
     name: &str,
     data: &TranscriptPageData,
 ) -> String {
+    let action_url = format!("/g/{}/transcripts/actions", escape(id));
+    let labels_action_url = format!("/g/{}/transcripts/labels/actions", escape(id));
+    let list_url = format!("/g/{}/transcripts", escape(id));
+    let panels = transcript_panel_options(data);
+    let mut body = transcript_page_heading(l, id, data);
+    render_transcript_filters(&mut body, l, &list_url, &panels, data);
+    render_transcript_label_manager(&mut body, l, id, &labels_action_url, data);
+    column_selector(&mut body, l, id, data);
+    render_transcript_records(&mut body, l, id, &action_url, data);
+    render_transcript_pagination(&mut body, l, id, data);
+    body.push_str("</section>");
+    shell(l, headers, id, name, keys::TICKET_TRANSCRIPTS, &body, false)
+}
+
+fn transcript_page_heading(l: Locale<'_>, id: &str, data: &TranscriptPageData) -> String {
     let id_html = escape(id);
-    let action_url = format!("/g/{id_html}/transcripts/actions");
-    let labels_action_url = format!("/g/{id_html}/transcripts/labels/actions");
-    let list_url = format!("/g/{id_html}/transcripts");
     let mut body = format!(
         r#"<header class="page-heading"><h1>{}</h1><div class="head-actions"><a class="button secondary" href="/g/{id_html}/tickets">{}</a></div></header>"#,
         l.text(keys::TICKET_TRANSCRIPTS),
@@ -108,35 +122,6 @@ pub(crate) fn transcripts_page(
             l.text(keys::CONFLICT)
         );
     }
-
-    let visible_labels = data
-        .labels
-        .iter()
-        .filter_map(|label| label["name"].as_str())
-        .collect::<BTreeSet<_>>();
-    let mut panels = BTreeMap::<String, String>::new();
-    for panel in &data.panels {
-        let Some(id) = panel["id"].as_str() else {
-            continue;
-        };
-        let name = panel["name"]
-            .as_str()
-            .filter(|name| !name.is_empty())
-            .unwrap_or(id);
-        panels.insert(id.to_owned(), name.to_owned());
-    }
-    for record in &data.records {
-        if let Some(id) = panel_id(record) {
-            let name = panel_display(record, &data.panels).unwrap_or_else(|| id.to_owned());
-            panels.entry(id.to_owned()).or_insert(name);
-        }
-    }
-    if let Some(selected) = data.filters.panel.as_ref() {
-        panels
-            .entry(selected.clone())
-            .or_insert_with(|| selected.clone());
-    }
-
     let _ = write!(
         body,
         r#"<section class="card panel"><header class="panel-heading"><h2>{}</h2><span>{}</span>"#,
@@ -193,13 +178,66 @@ pub(crate) fn transcripts_page(
             l.text(keys::TICKET_TRANSCRIPTS_BACKFILL_INCOMPLETE)
         );
     }
+    body
+}
 
+fn transcript_panel_options(data: &TranscriptPageData) -> BTreeMap<String, String> {
+    let mut panels = BTreeMap::<String, String>::new();
+    for panel in &data.panels {
+        let Some(id) = panel["id"].as_str() else {
+            continue;
+        };
+        let name = panel["name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(id);
+        panels.insert(id.to_owned(), name.to_owned());
+    }
+    for record in &data.records {
+        if let Some(id) = panel_id(record) {
+            let name = panel_display(record, &data.panels).unwrap_or_else(|| id.to_owned());
+            panels.entry(id.to_owned()).or_insert(name);
+        }
+    }
+    if let Some(selected) = data.filters.panel.as_ref() {
+        panels
+            .entry(selected.clone())
+            .or_insert_with(|| selected.clone());
+    }
+    panels
+}
+
+fn render_transcript_filters(
+    body: &mut String,
+    l: Locale<'_>,
+    list_url: &str,
+    panels: &BTreeMap<String, String>,
+    data: &TranscriptPageData,
+) {
     let _ = write!(
         body,
         r#"<form method="get" action="{list_url}" data-transcript-autosubmit><div class="form-grid">"#
     );
+    render_transcript_text_filters(body, l, data);
+    render_transcript_select_filters(body, l, panels, data);
+    for column in &data.filters.columns {
+        let _ = write!(
+            body,
+            r#"<input type="hidden" name="column" value="{}">"#,
+            escape(column)
+        );
+    }
+    render_transcript_label_filters(body, l, data);
+    let _ = write!(
+        body,
+        r#"<button class="button secondary" type="submit">{}</button></form>"#,
+        l.text(keys::TICKET_TRANSCRIPTS_FILTER)
+    );
+}
+
+fn render_transcript_text_filters(body: &mut String, l: Locale<'_>, data: &TranscriptPageData) {
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_TICKET_ID,
         "ticket_id",
@@ -207,7 +245,7 @@ pub(crate) fn transcripts_page(
         "text",
     );
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_USERNAME,
         "username",
@@ -215,7 +253,7 @@ pub(crate) fn transcripts_page(
         "search",
     );
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_USER_ID,
         "user_id",
@@ -223,7 +261,7 @@ pub(crate) fn transcripts_page(
         "text",
     );
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_CLOSED_BY,
         "closed_by",
@@ -231,7 +269,7 @@ pub(crate) fn transcripts_page(
         "text",
     );
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_CLAIMED_BY,
         "claimed_by",
@@ -239,14 +277,21 @@ pub(crate) fn transcripts_page(
         "text",
     );
     text_filter(
-        &mut body,
+        body,
         l,
         keys::TICKET_TRANSCRIPTS_CLOSE_REASON,
         "close_reason",
         data.filters.close_reason.as_deref(),
         "search",
     );
+}
 
+fn render_transcript_select_filters(
+    body: &mut String,
+    l: Locale<'_>,
+    panels: &BTreeMap<String, String>,
+    data: &TranscriptPageData,
+) {
     let _ = write!(
         body,
         r#"<label class="field"><span>{}</span><select name="panel"><option value="">{}</option>"#,
@@ -262,12 +307,11 @@ pub(crate) fn transcripts_page(
         let _ = write!(
             body,
             r#"<option value="{}"{selected}>{}</option>"#,
-            escape(&panel_id),
-            escape(&panel_name)
+            escape(panel_id),
+            escape(panel_name)
         );
     }
     body.push_str("</select></label>");
-
     let _ = write!(
         body,
         r#"<label class="field"><span>{}</span><select name="rating"><option value="">{}</option>"#,
@@ -288,128 +332,261 @@ pub(crate) fn transcripts_page(
         );
     }
     body.push_str("</select></label></div>");
+}
 
-    for column in &data.filters.columns {
-        let _ = write!(
-            body,
-            r#"<input type="hidden" name="column" value="{}">"#,
-            escape(column)
-        );
+fn render_transcript_label_filters(body: &mut String, l: Locale<'_>, data: &TranscriptPageData) {
+    if data.labels.is_empty() && data.filters.labels.is_empty() {
+        return;
     }
-    if !data.labels.is_empty() || !data.filters.labels.is_empty() {
-        body.push_str(r#"<fieldset class="settings-card"><legend>"#);
-        body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABELS));
-        body.push_str("</legend><div class=\"tag-list\">");
-        for selected in &data.filters.labels {
-            if !visible_labels.contains(selected.as_str()) {
-                let _ = write!(
-                    body,
-                    r#"<input type="hidden" name="label" value="{}">"#,
-                    escape(selected)
-                );
-            }
-        }
-        for label in &data.labels {
-            let Some(label_name) = label["name"].as_str() else {
-                continue;
-            };
-            let checked = data
-                .filters
-                .labels
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(label_name));
-            let color = label_color(label);
+    let visible_labels = data
+        .labels
+        .iter()
+        .filter_map(|label| label["name"].as_str())
+        .collect::<BTreeSet<_>>();
+    body.push_str(r#"<fieldset class="settings-card"><legend>"#);
+    body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABELS));
+    body.push_str("</legend><div class=\"tag-list\">");
+    for selected in &data.filters.labels {
+        if !visible_labels.contains(selected.as_str()) {
             let _ = write!(
                 body,
-                r#"<label class="pill"><input type="checkbox" name="label" value="{}"{}><input class="label-swatch" type="color" value="{}" disabled aria-hidden="true">{}</label>"#,
-                escape(label_name),
-                if checked { " checked" } else { "" },
-                color,
-                escape(label_name)
+                r#"<input type="hidden" name="label" value="{}">"#,
+                escape(selected)
             );
         }
-        body.push_str("</div></fieldset>");
     }
+    for label in &data.labels {
+        let Some(label_name) = label["name"].as_str() else {
+            continue;
+        };
+        let checked = data
+            .filters
+            .labels
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(label_name));
+        let color = label_color(label);
+        let _ = write!(
+            body,
+            r#"<label class="pill"><input type="checkbox" name="label" value="{}"{}><input class="label-swatch" type="color" value="{}" disabled aria-hidden="true">{}</label>"#,
+            escape(label_name),
+            if checked { " checked" } else { "" },
+            color,
+            escape(label_name)
+        );
+    }
+    body.push_str("</div></fieldset>");
+}
+
+fn render_transcript_label_manager(
+    body: &mut String,
+    l: Locale<'_>,
+    id: &str,
+    labels_action_url: &str,
+    data: &TranscriptPageData,
+) {
+    if !data.can_manage_labels {
+        return;
+    }
+    let open = if data.manage_open { " open" } else { "" };
     let _ = write!(
         body,
-        r#"<button class="button secondary" type="submit">{}</button></form>"#,
-        l.text(keys::TICKET_TRANSCRIPTS_FILTER)
+        r#"<details id="transcript-label-manager" class="settings-card"{open}><summary>{}</summary>"#,
+        l.text(keys::TICKET_TRANSCRIPTS_MANAGE_LABELS)
     );
-
-    if data.can_manage_labels {
-        let open = if data.manage_open { " open" } else { "" };
+    if let Some(etag) = data.label_etag.as_deref() {
+        manager_form(
+            body,
+            labels_action_url,
+            etag,
+            &data.label_tokens.create,
+            &data.return_query,
+            l,
+        );
+        render_label_definition_table(body, l, labels_action_url, etag, data);
+    } else {
         let _ = write!(
             body,
-            r#"<details id="transcript-label-manager" class="settings-card"{open}><summary>{}</summary>"#,
-            l.text(keys::TICKET_TRANSCRIPTS_MANAGE_LABELS)
+            r#"<p class="form-status" role="status">{}</p>"#,
+            l.text(keys::UNAVAILABLE)
         );
-        if let Some(etag) = data.label_etag.as_deref() {
-            manager_form(
-                &mut body,
-                &labels_action_url,
-                etag,
-                &data.label_tokens.create,
-                &data.return_query,
-                l,
-            );
-            body.push_str(r#"<div class="table-scroll"><table><thead><tr><th>"#);
-            body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABEL_NAME));
-            body.push_str("</th><th>");
-            body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABEL_COLOR));
-            body.push_str("</th><th></th></tr></thead><tbody>");
-            for label in &data.labels {
-                let Some(label_name) = label["name"].as_str() else {
-                    continue;
-                };
-                let color = label_color(label);
-                let _ = write!(
-                    body,
-                    r#"<tr><td>{}</td><td><span class="label-color"><input type="color" value="{}" disabled aria-hidden="true"><span class="mono">{}</span></span></td><td>"#,
-                    escape(label_name),
-                    color,
-                    color
-                );
-                if let Some(key) = data.label_tokens.delete.get(label_name) {
-                    let _ = write!(
-                        body,
-                        r#"<form method="post" action="{labels_action_url}"><input type="hidden" name="action" value="ticket.label.delete"><input type="hidden" name="name" value="{}"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="return_query" value="{}"><button class="button ghost" type="submit">{}</button></form>"#,
-                        escape(label_name),
-                        escape(etag),
-                        escape(key),
-                        escape(&data.return_query),
-                        l.text(keys::TICKET_TRANSCRIPTS_DELETE_LABEL)
-                    );
-                }
-                body.push_str("</td></tr>");
-            }
-            body.push_str("</tbody></table></div>");
-        } else {
-            let _ = write!(
-                body,
-                r#"<p class="form-status" role="status">{}</p>"#,
-                l.text(keys::UNAVAILABLE)
-            );
-        }
-        if let Some(cursor) = data.next_label_cursor.as_deref() {
-            let next = query_url(
-                id,
-                &data.filters,
-                data.before.as_deref(),
-                &data.previous,
-                Some(cursor),
-                true,
-                data.updated,
-            );
-            let _ = write!(
-                body,
-                r#"<p><a class="button secondary" href="{next}">{}</a></p>"#,
-                l.text(keys::TICKET_TRANSCRIPTS_MORE_LABELS)
-            );
-        }
-        body.push_str("</details>");
     }
+    if let Some(cursor) = data.next_label_cursor.as_deref() {
+        let next = query_url(
+            id,
+            &data.filters,
+            data.before.as_deref(),
+            &data.previous,
+            Some(cursor),
+            true,
+            data.updated,
+        );
+        let _ = write!(
+            body,
+            r#"<p><a class="button secondary" href="{next}">{}</a></p>"#,
+            l.text(keys::TICKET_TRANSCRIPTS_MORE_LABELS)
+        );
+    }
+    body.push_str("</details>");
+}
 
-    column_selector(&mut body, l, id, data);
+fn render_label_definition_table(
+    body: &mut String,
+    l: Locale<'_>,
+    labels_action_url: &str,
+    etag: &str,
+    data: &TranscriptPageData,
+) {
+    body.push_str(r#"<div class="table-scroll"><table><thead><tr><th>"#);
+    body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABEL_NAME));
+    body.push_str("</th><th>");
+    body.push_str(&l.text(keys::TICKET_TRANSCRIPTS_LABEL_COLOR));
+    body.push_str("</th><th></th></tr></thead><tbody>");
+    for label in &data.labels {
+        let Some(label_name) = label["name"].as_str() else {
+            continue;
+        };
+        let color = label_color(label);
+        let _ = write!(
+            body,
+            r#"<tr><td>{}</td><td><span class="label-color"><input type="color" value="{}" disabled aria-hidden="true"><span class="mono">{}</span></span></td><td>"#,
+            escape(label_name),
+            color,
+            color
+        );
+        if let Some(key) = data.label_tokens.delete.get(label_name) {
+            let _ = write!(
+                body,
+                r#"<form method="post" action="{labels_action_url}"><input type="hidden" name="action" value="ticket.label.delete"><input type="hidden" name="name" value="{}"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="return_query" value="{}"><button class="button ghost" type="submit">{}</button></form>"#,
+                escape(label_name),
+                escape(etag),
+                escape(key),
+                escape(&data.return_query),
+                l.text(keys::TICKET_TRANSCRIPTS_DELETE_LABEL)
+            );
+        }
+        body.push_str("</td></tr>");
+    }
+    body.push_str("</tbody></table></div>");
+}
+
+struct TranscriptRowDisplay {
+    ticket_id: String,
+    opener: String,
+    rating: String,
+    closing_staff: String,
+    claimed: String,
+    panel: String,
+    closure_time: String,
+    reason_text: String,
+    labels: Vec<String>,
+    detail_url: String,
+    can_view: bool,
+    channel_id: String,
+    channel_safe: bool,
+}
+
+fn transcript_row_display(
+    l: Locale<'_>,
+    id: &str,
+    data: &TranscriptPageData,
+    ticket: &Value,
+) -> TranscriptRowDisplay {
+    let number = ticket["number"].as_u64().unwrap_or(0);
+    let channel_id = ticket["channel_id"].as_str().unwrap_or("");
+    let can_view =
+        ticket["has_transcript"].as_bool() == Some(true) && session::snowflake(channel_id);
+    let detail_url = if can_view {
+        transcript_detail_url(id, channel_id, &data.return_query)
+    } else {
+        String::new()
+    };
+    let ticket_id = if can_view {
+        format!(
+            r#"<a href="{}">#{}</a>"#,
+            escape(&detail_url),
+            group_digits(number)
+        )
+    } else {
+        format!("#{}", group_digits(number))
+    };
+    let opener = ticket["opener_username"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || {
+                ticket["opener"]
+                    .as_str()
+                    .map_or_else(|| "—".to_owned(), id_text)
+            },
+            escape,
+        );
+    let rating = ticket["rating"]["score"]
+        .as_u64()
+        .filter(|score| (1..=5).contains(score))
+        .and_then(|score| {
+            usize::try_from(score)
+                .ok()
+                .map(|stars| format!("{} {score}/5", "★".repeat(stars)))
+        })
+        .unwrap_or_else(|| l.text(keys::TICKET_TRANSCRIPTS_NO_RATING));
+    let closing_staff = ticket["closer"]
+        .as_str()
+        .map_or_else(|| "—".to_owned(), id_text);
+    let claimed = ticket["claimed_by"]
+        .as_str()
+        .map_or_else(|| "—".to_owned(), id_text);
+    let panel =
+        panel_display(ticket, &data.panels).map_or_else(|| "—".to_owned(), |name| escape(&name));
+    let closure_time = ticket["closed"].as_i64().map_or_else(
+        || "—".to_owned(),
+        |time| l.relative_time(time, session::now()),
+    );
+    let reason = ticket["reason"].as_str().unwrap_or("");
+    let reason_text = if reason.trim().is_empty() {
+        l.text(keys::TICKET_TRANSCRIPTS_NO_REASON)
+    } else {
+        escape(reason)
+    };
+    let labels = ticket["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    TranscriptRowDisplay {
+        ticket_id,
+        opener,
+        rating,
+        closing_staff,
+        claimed,
+        panel,
+        closure_time,
+        reason_text,
+        labels,
+        detail_url,
+        can_view,
+        channel_id: channel_id.to_owned(),
+        channel_safe: session::snowflake(channel_id),
+    }
+}
+
+struct TranscriptFormContext<'a> {
+    action_url: &'a str,
+    channel_id: &'a str,
+    etag: &'a str,
+    reason: &'a str,
+    labels_json: &'a str,
+    return_query: &'a str,
+}
+
+fn render_transcript_records(
+    body: &mut String,
+    l: Locale<'_>,
+    id: &str,
+    action_url: &str,
+    data: &TranscriptPageData,
+) {
     body.push_str(r#"<div class="table-scroll"><table><thead><tr>"#);
     for (column, key) in TRANSCRIPT_COLUMNS {
         if column_visible(data, column) {
@@ -418,161 +595,7 @@ pub(crate) fn transcripts_page(
     }
     body.push_str("</tr></thead><tbody>");
     for ticket in &data.records {
-        let number = ticket["number"].as_u64().unwrap_or(0);
-        let channel_id = ticket["channel_id"].as_str().unwrap_or("");
-        let can_view =
-            ticket["has_transcript"].as_bool() == Some(true) && session::snowflake(channel_id);
-        let detail_url = if can_view {
-            transcript_detail_url(id, channel_id, &data.return_query)
-        } else {
-            String::new()
-        };
-        let ticket_id = if can_view {
-            format!(
-                r#"<a href="{}">#{}</a>"#,
-                escape(&detail_url),
-                group_digits(number)
-            )
-        } else {
-            format!("#{}", group_digits(number))
-        };
-        let opener = ticket["opener_username"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(escape)
-            .or_else(|| ticket["opener"].as_str().map(id_text))
-            .unwrap_or_else(|| "—".to_owned());
-        let rating = ticket["rating"]["score"]
-            .as_u64()
-            .filter(|score| (1..=5).contains(score))
-            .map(|score| format!("{} {score}/5", "★".repeat(score as usize)))
-            .unwrap_or_else(|| l.text(keys::TICKET_TRANSCRIPTS_NO_RATING));
-        let closing_staff = ticket["closer"]
-            .as_str()
-            .map(id_text)
-            .unwrap_or_else(|| "—".to_owned());
-        let claimed = ticket["claimed_by"]
-            .as_str()
-            .map(id_text)
-            .unwrap_or_else(|| "—".to_owned());
-        let panel = panel_display(ticket, &data.panels)
-            .map(|name| escape(&name))
-            .unwrap_or_else(|| "—".to_owned());
-        let closure_time = ticket["closed"].as_i64().map_or_else(
-            || "—".to_owned(),
-            |time| l.relative_time(time, session::now()),
-        );
-        let reason = ticket["reason"].as_str().unwrap_or("");
-        let reason_text = if reason.trim().is_empty() {
-            l.text(keys::TICKET_TRANSCRIPTS_NO_REASON)
-        } else {
-            escape(reason)
-        };
-        let labels = ticket["labels"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        let channel_safe = session::snowflake(channel_id);
-        body.push_str("<tr>");
-        if column_visible(data, "ticket_id") {
-            let _ = write!(body, "<td>{ticket_id}</td>");
-        }
-        if column_visible(data, "username") {
-            let _ = write!(body, "<td>{opener}</td>");
-        }
-        if column_visible(data, "rating") {
-            let _ = write!(body, "<td>{}</td>", escape(&rating));
-        }
-        if column_visible(data, "closed_by") {
-            let _ = write!(body, "<td>{closing_staff}</td>");
-        }
-        if column_visible(data, "claimed_by") {
-            let _ = write!(body, "<td>{claimed}</td>");
-        }
-        if column_visible(data, "panel") {
-            let _ = write!(body, "<td>{panel}</td>");
-        }
-        if column_visible(data, "closed_at") {
-            let _ = write!(body, "<td>{}</td>", escape(&closure_time));
-        }
-        if column_visible(data, "reason") {
-            let _ = write!(body, "<td>{reason_text}</td>");
-        }
-        if column_visible(data, "labels") {
-            body.push_str("<td>");
-            for label in &labels {
-                let color = data
-                    .labels
-                    .iter()
-                    .find(|definition| {
-                        definition["name"]
-                            .as_str()
-                            .is_some_and(|name| name.eq_ignore_ascii_case(label))
-                    })
-                    .map(label_color)
-                    .unwrap_or_else(|| "#808080".to_owned());
-                let _ = write!(
-                    body,
-                    r#"<span class="pill"><input class="label-swatch" type="color" value="{}" disabled aria-hidden="true">{}</span> "#,
-                    color,
-                    escape(label)
-                );
-            }
-            body.push_str("</td>");
-        }
-        if column_visible(data, "actions") {
-            body.push_str("<td>");
-            if can_view {
-                let _ = write!(
-                    body,
-                    r#"<a class="button secondary" href="{}">{}</a>"#,
-                    escape(&detail_url),
-                    l.text(keys::TICKET_TRANSCRIPTS_VIEW)
-                );
-            } else {
-                let _ = write!(
-                    body,
-                    r#"<span class="settings-help">{}</span>"#,
-                    l.text(keys::TICKET_TRANSCRIPTS_NO_TRANSCRIPT)
-                );
-            }
-            if channel_safe
-                && let Some(tokens) = data.row_tokens.get(channel_id)
-                && let Some(revision) = ticket["revision"].as_i64().filter(|revision| *revision > 0)
-            {
-                let etag = format!("\"{revision}\"");
-                let labels_json = serde_json::to_string(&labels).unwrap_or_default();
-                render_reason_form(
-                    &mut body,
-                    &action_url,
-                    channel_id,
-                    &etag,
-                    &tokens.reason,
-                    &reason,
-                    &labels_json,
-                    &data.return_query,
-                    l,
-                );
-                render_label_forms(
-                    &mut body,
-                    &action_url,
-                    channel_id,
-                    &etag,
-                    tokens,
-                    &reason,
-                    &labels,
-                    &data.labels,
-                    &labels_json,
-                    &data.return_query,
-                    l,
-                );
-            }
-            body.push_str("</td>");
-        }
-        body.push_str("</tr>");
+        render_transcript_row(body, l, id, action_url, data, ticket);
     }
     body.push_str("</tbody></table></div>");
     if data.records.is_empty() {
@@ -582,6 +605,129 @@ pub(crate) fn transcripts_page(
             l.text(keys::TICKET_TRANSCRIPTS_NO_RESULTS)
         );
     }
+}
+
+fn render_transcript_row(
+    body: &mut String,
+    l: Locale<'_>,
+    id: &str,
+    action_url: &str,
+    data: &TranscriptPageData,
+    ticket: &Value,
+) {
+    let display = transcript_row_display(l, id, data, ticket);
+    body.push_str("<tr>");
+    render_transcript_cells(body, l, data, &display);
+    render_transcript_actions(body, l, action_url, data, ticket, &display);
+    body.push_str("</tr>");
+}
+
+fn render_transcript_cells(
+    body: &mut String,
+    l: Locale<'_>,
+    data: &TranscriptPageData,
+    display: &TranscriptRowDisplay,
+) {
+    if column_visible(data, "ticket_id") {
+        let _ = write!(body, "<td>{}</td>", display.ticket_id);
+    }
+    if column_visible(data, "username") {
+        let _ = write!(body, "<td>{}</td>", display.opener);
+    }
+    if column_visible(data, "rating") {
+        let _ = write!(body, "<td>{}</td>", escape(&display.rating));
+    }
+    if column_visible(data, "closed_by") {
+        let _ = write!(body, "<td>{}</td>", display.closing_staff);
+    }
+    if column_visible(data, "claimed_by") {
+        let _ = write!(body, "<td>{}</td>", display.claimed);
+    }
+    if column_visible(data, "panel") {
+        let _ = write!(body, "<td>{}</td>", display.panel);
+    }
+    if column_visible(data, "closed_at") {
+        let _ = write!(body, "<td>{}</td>", escape(&display.closure_time));
+    }
+    if column_visible(data, "reason") {
+        let _ = write!(body, "<td>{}</td>", display.reason_text);
+    }
+    if column_visible(data, "labels") {
+        body.push_str("<td>");
+        for label in &display.labels {
+            let color = data
+                .labels
+                .iter()
+                .find(|definition| {
+                    definition["name"]
+                        .as_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(label))
+                })
+                .map_or_else(|| "#808080".to_owned(), label_color);
+            let _ = write!(
+                body,
+                r#"<span class="pill"><input class="label-swatch" type="color" value="{}" disabled aria-hidden="true">{}</span> "#,
+                color,
+                escape(label)
+            );
+        }
+        body.push_str("</td>");
+    }
+}
+
+fn render_transcript_actions(
+    body: &mut String,
+    l: Locale<'_>,
+    action_url: &str,
+    data: &TranscriptPageData,
+    ticket: &Value,
+    display: &TranscriptRowDisplay,
+) {
+    if !column_visible(data, "actions") {
+        return;
+    }
+    body.push_str("<td>");
+    if display.can_view {
+        let _ = write!(
+            body,
+            r#"<a class="button secondary" href="{}">{}</a>"#,
+            escape(&display.detail_url),
+            l.text(keys::TICKET_TRANSCRIPTS_VIEW)
+        );
+    } else {
+        let _ = write!(
+            body,
+            r#"<span class="settings-help">{}</span>"#,
+            l.text(keys::TICKET_TRANSCRIPTS_NO_TRANSCRIPT)
+        );
+    }
+    if display.channel_safe
+        && let Some(tokens) = data.row_tokens.get(&display.channel_id)
+        && let Some(revision) = ticket["revision"].as_i64().filter(|revision| *revision > 0)
+    {
+        let etag = format!("\"{revision}\"");
+        let labels_json = serde_json::to_string(&display.labels).unwrap_or_default();
+        let reason = ticket["reason"].as_str().unwrap_or("");
+        let form = TranscriptFormContext {
+            action_url,
+            channel_id: &display.channel_id,
+            etag: &etag,
+            reason,
+            labels_json: &labels_json,
+            return_query: &data.return_query,
+        };
+        render_reason_form(body, l, &form, &tokens.reason);
+        render_label_forms(body, l, &form, tokens, &display.labels, &data.labels);
+    }
+    body.push_str("</td>");
+}
+
+fn render_transcript_pagination(
+    body: &mut String,
+    l: Locale<'_>,
+    id: &str,
+    data: &TranscriptPageData,
+) {
     if data.before.is_some() {
         let mut previous_cursors = data.previous.clone();
         let previous_before = previous_cursors.pop();
@@ -629,8 +775,6 @@ pub(crate) fn transcripts_page(
             l.text(keys::TICKET_TRANSCRIPTS_NEXT)
         );
     }
-    body.push_str("</section>");
-    shell(l, headers, id, name, keys::TICKET_TRANSCRIPTS, &body, false)
 }
 
 fn column_visible(data: &TranscriptPageData, column: &str) -> bool {
@@ -760,42 +904,33 @@ fn manager_form(
 
 fn render_reason_form(
     body: &mut String,
-    action_url: &str,
-    channel_id: &str,
-    etag: &str,
-    key: &str,
-    reason: &str,
-    labels_json: &str,
-    return_query: &str,
     l: Locale<'_>,
+    form: &TranscriptFormContext<'_>,
+    key: &str,
 ) {
     let _ = write!(
         body,
-        r#"<details class="settings-card"><summary>{}</summary><form method="post" action="{action_url}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="reason"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><textarea name="reason" maxlength="1000" rows="2">{}</textarea></label><button class="button secondary" type="submit">{}</button></form></details>"#,
+        r#"<details class="settings-card"><summary>{}</summary><form method="post" action="{}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="reason"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><textarea name="reason" maxlength="1000" rows="2">{}</textarea></label><button class="button secondary" type="submit">{}</button></form></details>"#,
         l.text(keys::TICKET_TRANSCRIPTS_EDIT_REASON),
-        escape(channel_id),
-        escape(etag),
+        escape(form.action_url),
+        escape(form.channel_id),
+        escape(form.etag),
         escape(key),
-        escape(labels_json),
-        escape(return_query),
+        escape(form.labels_json),
+        escape(form.return_query),
         l.text(keys::TICKET_TRANSCRIPTS_CLOSE_REASON),
-        escape(reason),
+        escape(form.reason),
         l.text(keys::TICKET_TRANSCRIPTS_SAVE)
     );
 }
 
 fn render_label_forms(
     body: &mut String,
-    action_url: &str,
-    channel_id: &str,
-    etag: &str,
+    l: Locale<'_>,
+    form: &TranscriptFormContext<'_>,
     tokens: &TranscriptActionTokens,
-    reason: &str,
     current: &[String],
     labels: &[Value],
-    labels_json: &str,
-    return_query: &str,
-    l: Locale<'_>,
 ) {
     let _ = write!(
         body,
@@ -804,13 +939,14 @@ fn render_label_forms(
     );
     let _ = write!(
         body,
-        r#"<form method="post" action="{action_url}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="label_add"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="reason" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><select name="label">"#,
-        escape(channel_id),
-        escape(etag),
+        r#"<form method="post" action="{}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="label_add"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="reason" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><select name="label">"#,
+        escape(form.action_url),
+        escape(form.channel_id),
+        escape(form.etag),
         escape(&tokens.add_label),
-        escape(reason),
-        escape(labels_json),
-        escape(return_query),
+        escape(form.reason),
+        escape(form.labels_json),
+        escape(form.return_query),
         l.text(keys::TICKET_TRANSCRIPTS_ADD_LABEL)
     );
     let mut available = false;
@@ -845,13 +981,14 @@ fn render_label_forms(
     if !current.is_empty() {
         let _ = write!(
             body,
-            r#"<form method="post" action="{action_url}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="label_remove"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="reason" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><select name="label">"#,
-            escape(channel_id),
-            escape(etag),
+            r#"<form method="post" action="{}"><input type="hidden" name="channel_id" value="{}"><input type="hidden" name="action" value="ticket.history.update"><input type="hidden" name="intent" value="label_remove"><input type="hidden" name="etag" value="{}"><input type="hidden" name="key" value="{}"><input type="hidden" name="reason" value="{}"><input type="hidden" name="labels_json" value="{}"><input type="hidden" name="return_query" value="{}"><label class="field"><span>{}</span><select name="label">"#,
+            escape(form.action_url),
+            escape(form.channel_id),
+            escape(form.etag),
             escape(&tokens.remove_label),
-            escape(reason),
-            escape(labels_json),
-            escape(return_query),
+            escape(form.reason),
+            escape(form.labels_json),
+            escape(form.return_query),
             l.text(keys::TICKET_TRANSCRIPTS_REMOVE_LABEL)
         );
         for label in current {

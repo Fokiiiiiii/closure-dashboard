@@ -765,8 +765,9 @@ pub fn parse_form_questions(field: &Field, input: &str) -> Option<Value> {
     let questions = value.as_array()?;
     let maximum = field.schema["maxItems"]
         .as_u64()
-        .unwrap_or(FORM_QUESTIONS_LIMIT as u64)
-        .min(FORM_QUESTIONS_LIMIT as u64) as usize;
+        .and_then(|limit| usize::try_from(limit).ok())
+        .unwrap_or(FORM_QUESTIONS_LIMIT)
+        .min(FORM_QUESTIONS_LIMIT);
     if questions.len() > maximum {
         return None;
     }
@@ -780,8 +781,14 @@ pub fn parse_form_questions(field: &Field, input: &str) -> Option<Value> {
         .find(|variant| variant["type"] == "object")?;
     let object_properties = object["properties"].as_object()?;
     let allowed_types = object_properties.get("type")?["enum"].as_array()?;
-    let minimum = legacy["minLength"].as_u64().unwrap_or(1) as usize;
-    let maximum_length = legacy["maxLength"].as_u64().unwrap_or(u64::MAX) as usize;
+    let minimum = legacy["minLength"]
+        .as_u64()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or(usize::MAX);
+    let maximum_length = legacy["maxLength"]
+        .as_u64()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or(usize::MAX);
 
     for question in questions {
         match question {
@@ -856,8 +863,8 @@ pub fn entries<S: std::hash::BuildHasher>(
     Ok(Value::Object(map))
 }
 
-/// The rows of a list field, read from the inputs named `<field>.<row>.<column>`.
-/// A row ticked for removal or left empty is dropped; `None` when a row cannot be read.
+/// The rows of a list field, read from the inputs named \`<field>.<row>.<column>\`.
+/// A row ticked for removal or left empty is dropped; \`None\` when a row cannot be read.
 #[must_use]
 pub fn rows<S: std::hash::BuildHasher>(
     field: &Field,
@@ -865,210 +872,27 @@ pub fn rows<S: std::hash::BuildHasher>(
     input: &HashMap<String, String, S>,
 ) -> Option<Value> {
     let prefix = format!("{}.", field.name);
-    if columns.iter().any(|column| {
-        column.kind == Kind::TextList
-            || column.kind == Kind::FormQuestions
-            || matches!(&column.kind, &Kind::NestedList(_))
-    }) {
-        for key in input.keys().filter(|key| key.starts_with(&prefix)) {
-            let mut parts = key.strip_prefix(&prefix)?.split('.');
-            let _row = parts.next()?.parse::<usize>().ok()?;
-            match parts.next() {
-                Some("x")
-                    if parts.next().is_none()
-                        && input.get(key).is_some_and(|value| value == "1") => {}
-                Some(name) => {
-                    if let Some(list_name) = name.strip_suffix("_present") {
-                        if columns.iter().any(|column| {
-                            column.name == list_name && matches!(&column.kind, &Kind::NestedList(_))
-                        }) && parts.next().is_none()
-                            && input.get(key).is_some_and(|value| value == "1")
-                        {
-                            continue;
-                        }
-                        return None;
-                    }
-                    let column = columns.iter().find(|column| column.name == name)?;
-                    match &column.kind {
-                        Kind::TextList => {
-                            let _item = parts.next()?.parse::<usize>().ok()?;
-                            match parts.next() {
-                                None => {}
-                                Some("x")
-                                    if parts.next().is_none()
-                                        && input.get(key).is_some_and(|value| value == "1") => {}
-                                _ => return None,
-                            }
-                        }
-                        Kind::NestedList(nested_columns) => {
-                            let nested_row = parts.next()?.parse::<usize>().ok()?;
-                            if column.schema["maxItems"]
-                                .as_u64()
-                                .is_some_and(|maximum| nested_row as u64 >= maximum)
-                            {
-                                return None;
-                            }
-                            match parts.next() {
-                                Some("x")
-                                    if parts.next().is_none()
-                                        && input.get(key).is_some_and(|value| value == "1") => {}
-                                Some("order")
-                                    if column.schema["x-ui"]["widget"] == "access-rules"
-                                        && parts.next().is_none() => {}
-                                Some(name)
-                                    if nested_columns.iter().any(|nested| nested.name == name)
-                                        && parts.next().is_none() => {}
-                                _ => return None,
-                            }
-                        }
-                        Kind::FormQuestions => {
-                            let Some(question_index) = parts.next() else {
-                                continue;
-                            };
-                            let question = question_index.parse::<usize>().ok()?;
-                            let maximum = column.schema["maxItems"]
-                                .as_u64()
-                                .unwrap_or(FORM_QUESTIONS_LIMIT as u64)
-                                .min(FORM_QUESTIONS_LIMIT as u64)
-                                as usize;
-                            if question >= maximum {
-                                return None;
-                            }
-                            match parts.next() {
-                                None => {}
-                                Some("x")
-                                    if parts.next().is_none()
-                                        && input.get(key).is_some_and(|value| value == "1") => {}
-                                Some(name) => {
-                                    let object = column.schema["items"]["oneOf"]
-                                        .as_array()?
-                                        .iter()
-                                        .find(|variant| variant["type"] == "object")?;
-                                    let question_properties = object["properties"].as_object()?;
-                                    let property = question_properties.get(name)?;
-                                    if name == "options" {
-                                        let Some(option_index) = parts.next() else {
-                                            continue;
-                                        };
-                                        let option = option_index.parse::<usize>().ok()?;
-                                        let maximum =
-                                            property["maxItems"].as_u64().unwrap_or(25).min(25)
-                                                as usize;
-                                        if option >= maximum {
-                                            return None;
-                                        }
-                                        match parts.next() {
-                                            Some("x")
-                                                if parts.next().is_none()
-                                                    && input
-                                                        .get(key)
-                                                        .is_some_and(|value| value == "1") => {}
-                                            Some(option_field)
-                                                if property["items"]["properties"]
-                                                    .get(option_field)
-                                                    .is_some()
-                                                    && parts.next().is_none() => {}
-                                            _ => return None,
-                                        }
-                                    } else if parts.next().is_some() {
-                                        return None;
-                                    }
-                                }
-                            }
-                        }
-                        _ if parts.next().is_none() => {}
-                        _ => return None,
-                    }
-                }
-                None => return None,
-            }
-        }
-    }
+    validate_rows_input(&prefix, columns, input)?;
+
     let mut numbers: Vec<usize> = input
         .keys()
         .filter_map(|key| key.strip_prefix(&prefix)?.split('.').next()?.parse().ok())
         .collect();
     numbers.sort_unstable();
     numbers.dedup();
+
     let ordered_access_rules = field.schema["x-ui"]["widget"] == "access-rules";
     let mut output_rows = Vec::new();
     let mut access_rules = Vec::<(usize, usize, Value)>::new();
     for number in numbers {
-        let key = |column: &str| format!("{prefix}{number}.{column}");
-        if input.get(&key("x")).is_some_and(|v| v == "1") {
+        let row_marker = format!("{prefix}{number}.x");
+        if input
+            .get(&row_marker)
+            .is_some_and(|value| value == "1")
+        {
             continue;
         }
-        let mut row = Map::new();
-        for column in columns {
-            let cell_name = key(&column.name);
-            let raw = input.get(&cell_name).map_or("", String::as_str);
-            let cell = Field {
-                name: column.name.clone(),
-                label: column.name.clone(),
-                kind: column.kind.clone(),
-                schema: column.schema.clone(),
-            };
-            let end_of_day_key = key(&format!("{}.end-of-day", column.name));
-            let end_of_day = column.kind == Kind::Integer
-                && column.schema["x-ui"]["widget"] == "time-minute"
-                && column.schema["maximum"]
-                    .as_i64()
-                    .or_else(|| column.schema["x-ui"]["max"].as_i64())
-                    .is_some_and(|maximum| maximum == 1440)
-                && input.get(&end_of_day_key).is_some_and(|value| value == "1");
-            let parsed = if end_of_day {
-                parse(&cell, "24:00")
-            } else if column.kind == Kind::TextList {
-                let mut cell = cell.clone();
-                cell.name = cell_name;
-                text_list(&cell, input)
-            } else if let Kind::NestedList(nested_columns) = &column.kind {
-                let nested = Field {
-                    name: cell_name.clone(),
-                    label: column.name.clone(),
-                    kind: Kind::List(nested_columns.clone()),
-                    schema: column.schema.clone(),
-                };
-                let nested_rows = rows(&nested, nested_columns, input)?;
-                if column.schema["x-ui"]["widget"] == "access-rules" {
-                    let mut seen = HashSet::new();
-                    if nested_rows
-                        .as_array()?
-                        .iter()
-                        .any(|rule| !rule["role_id"].as_str().is_some_and(|id| seen.insert(id)))
-                    {
-                        return None;
-                    }
-                }
-                Some(nested_rows)
-            } else {
-                parse(&cell, raw)
-            };
-            match parsed {
-                Some(Value::Array(values))
-                    if (column.kind == Kind::TextList
-                        || column.kind == Kind::FormQuestions
-                        || matches!(&column.kind, Kind::NestedList(_)))
-                        && values.is_empty()
-                        && !column.required
-                        && row.values().all(Value::is_null) => {}
-                Some(Value::Null)
-                    if matches!(
-                        column.schema["x-ui"]["widget"].as_str(),
-                        Some("ticket-panel" | "ticket-form")
-                    ) || column.name == "waiting_category"
-                        && column.schema["x-ui"]["widget"] == "channel" =>
-                {
-                    row.insert(column.name.clone(), Value::Null);
-                }
-                Some(Value::Null) => {}
-                Some(value) => {
-                    row.insert(column.name.clone(), value);
-                }
-                None if column.kind == Kind::Boolean && raw.is_empty() => {}
-                None => return None,
-            }
-        }
+        let row = parse_row_fields(columns, input, &prefix, number)?;
         if !columns.iter().any(|column| {
             !is_preset(&column.kind)
                 && row.get(&column.name).is_some_and(|value| {
@@ -1079,13 +903,14 @@ pub fn rows<S: std::hash::BuildHasher>(
         }
         if columns
             .iter()
-            .any(|c| c.required && !row.contains_key(&c.name))
+            .any(|column| column.required && !row.contains_key(&column.name))
         {
             return None;
         }
         let row = Value::Object(row);
         if ordered_access_rules {
-            let order = input.get(&key("order")).map_or(Some(number), |value| {
+            let order_key = format!("{prefix}{number}.order");
+            let order = input.get(&order_key).map_or(Some(number), |value| {
                 value.parse::<usize>().ok()?.checked_sub(1)
             })?;
             access_rules.push((order, number, row));
@@ -1103,6 +928,255 @@ pub fn rows<S: std::hash::BuildHasher>(
         ));
     }
     Some(Value::Array(output_rows))
+}
+
+fn validate_rows_input<S: std::hash::BuildHasher>(
+    prefix: &str,
+    columns: &[Column],
+    input: &HashMap<String, String, S>,
+) -> Option<()> {
+    if columns.iter().any(|column| {
+        column.kind == Kind::TextList
+            || column.kind == Kind::FormQuestions
+            || matches!(&column.kind, &Kind::NestedList(_))
+    }) {
+        for key in input.keys().filter(|key| key.starts_with(prefix)) {
+            validate_row_input(prefix, key, columns, input)?;
+        }
+    }
+    Some(())
+}
+
+fn validate_row_input<S: std::hash::BuildHasher>(
+    prefix: &str,
+    key: &str,
+    columns: &[Column],
+    input: &HashMap<String, String, S>,
+) -> Option<()> {
+    let mut parts = key.strip_prefix(prefix)?.split('.');
+    let _row = parts.next()?.parse::<usize>().ok()?;
+    match parts.next() {
+        Some("x")
+            if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") =>
+        {
+            Some(())
+        }
+        Some(name) => {
+            if let Some(list_name) = name.strip_suffix("_present") {
+                if columns.iter().any(|column| {
+                    column.name == list_name && matches!(&column.kind, &Kind::NestedList(_))
+                }) && parts.next().is_none()
+                    && input.get(key).is_some_and(|value| value == "1")
+                {
+                    return Some(());
+                }
+                return None;
+            }
+            let column = columns.iter().find(|column| column.name == name)?;
+            match &column.kind {
+                Kind::TextList => {
+                    let _item = parts.next()?.parse::<usize>().ok()?;
+                    match parts.next() {
+                        None => Some(()),
+                        Some("x")
+                            if parts.next().is_none()
+                                && input.get(key).is_some_and(|value| value == "1") =>
+                        {
+                            Some(())
+                        }
+                        _ => None,
+                    }
+                }
+                Kind::NestedList(nested_columns) => {
+                    let nested_row = parts.next()?.parse::<usize>().ok()?;
+                    if let Some(maximum) = column.schema["maxItems"].as_u64() {
+                        if u64::try_from(nested_row).ok()? >= maximum {
+                            return None;
+                        }
+                    }
+                    match parts.next() {
+                        Some("x")
+                            if parts.next().is_none()
+                                && input.get(key).is_some_and(|value| value == "1") =>
+                        {
+                            Some(())
+                        }
+                        Some("order")
+                            if column.schema["x-ui"]["widget"] == "access-rules"
+                                && parts.next().is_none() =>
+                        {
+                            Some(())
+                        }
+                        Some(name)
+                            if nested_columns.iter().any(|nested| nested.name == name)
+                                && parts.next().is_none() =>
+                        {
+                            Some(())
+                        }
+                        _ => None,
+                    }
+                }
+                Kind::FormQuestions => {
+                    validate_form_question_input(column, &mut parts, key, input)
+                }
+                _ if parts.next().is_none() => Some(()),
+                _ => None,
+            }
+        }
+        None => None,
+    }
+}
+
+fn validate_form_question_input<'a, S: std::hash::BuildHasher>(
+    column: &Column,
+    parts: &mut std::str::Split<'a, char>,
+    key: &str,
+    input: &HashMap<String, String, S>,
+) -> Option<()> {
+    let Some(question_index) = parts.next() else {
+        return Some(());
+    };
+    let question = question_index.parse::<usize>().ok()?;
+    let maximum = column.schema["maxItems"]
+        .as_u64()
+        .and_then(|limit| usize::try_from(limit).ok())
+        .unwrap_or(FORM_QUESTIONS_LIMIT)
+        .min(FORM_QUESTIONS_LIMIT);
+    if question >= maximum {
+        return None;
+    }
+    match parts.next() {
+        None => Some(()),
+        Some("x")
+            if parts.next().is_none() && input.get(key).is_some_and(|value| value == "1") =>
+        {
+            Some(())
+        }
+        Some(name) => {
+            let object = column.schema["items"]["oneOf"]
+                .as_array()?
+                .iter()
+                .find(|variant| variant["type"] == "object")?;
+            let question_properties = object["properties"].as_object()?;
+            let property = question_properties.get(name)?;
+            if name == "options" {
+                let Some(option_index) = parts.next() else {
+                    return Some(());
+                };
+                let option = option_index.parse::<usize>().ok()?;
+                let maximum = property["maxItems"]
+                    .as_u64()
+                    .and_then(|limit| usize::try_from(limit).ok())
+                    .unwrap_or(25)
+                    .min(25);
+                if option >= maximum {
+                    return None;
+                }
+                match parts.next() {
+                    Some("x")
+                        if parts.next().is_none()
+                            && input.get(key).is_some_and(|value| value == "1") =>
+                    {
+                        Some(())
+                    }
+                    Some(option_field)
+                        if property["items"]["properties"]
+                            .get(option_field)
+                            .is_some()
+                            && parts.next().is_none() =>
+                    {
+                        Some(())
+                    }
+                    _ => None,
+                }
+            } else if parts.next().is_some() {
+                None
+            } else {
+                Some(())
+            }
+        }
+    }
+}
+
+fn parse_row_fields<S: std::hash::BuildHasher>(
+    columns: &[Column],
+    input: &HashMap<String, String, S>,
+    prefix: &str,
+    number: usize,
+) -> Option<Map<String, Value>> {
+    let key = |column: &str| format!("{prefix}{number}.{column}");
+    let mut row = Map::new();
+    for column in columns {
+        let cell_name = key(&column.name);
+        let raw = input.get(&cell_name).map_or("", String::as_str);
+        let cell = Field {
+            name: column.name.clone(),
+            label: column.name.clone(),
+            kind: column.kind.clone(),
+            schema: column.schema.clone(),
+        };
+        let end_of_day_key = key(&format!("{}.end-of-day", column.name));
+        let end_of_day = column.kind == Kind::Integer
+            && column.schema["x-ui"]["widget"] == "time-minute"
+            && column.schema["maximum"]
+                .as_i64()
+                .or_else(|| column.schema["x-ui"]["max"].as_i64())
+                .is_some_and(|maximum| maximum == 1440)
+            && input.get(&end_of_day_key).is_some_and(|value| value == "1");
+        let parsed = if end_of_day {
+            parse(&cell, "24:00")
+        } else if column.kind == Kind::TextList {
+            let mut cell = cell.clone();
+            cell.name = cell_name;
+            text_list(&cell, input)
+        } else if let Kind::NestedList(nested_columns) = &column.kind {
+            let nested = Field {
+                name: cell_name.clone(),
+                label: column.name.clone(),
+                kind: Kind::List(nested_columns.clone()),
+                schema: column.schema.clone(),
+            };
+            let nested_rows = rows(&nested, nested_columns, input)?;
+            if column.schema["x-ui"]["widget"] == "access-rules" {
+                let mut seen = HashSet::new();
+                if nested_rows
+                    .as_array()?
+                    .iter()
+                    .any(|rule| !rule["role_id"].as_str().is_some_and(|id| seen.insert(id)))
+                {
+                    return None;
+                }
+            }
+            Some(nested_rows)
+        } else {
+            parse(&cell, raw)
+        };
+        match parsed {
+            Some(Value::Array(values))
+                if (column.kind == Kind::TextList
+                    || column.kind == Kind::FormQuestions
+                    || matches!(&column.kind, Kind::NestedList(_)))
+                    && values.is_empty()
+                    && !column.required
+                    && row.values().all(Value::is_null) => {}
+            Some(Value::Null)
+                if matches!(
+                    column.schema["x-ui"]["widget"].as_str(),
+                    Some("ticket-panel" | "ticket-form")
+                ) || column.name == "waiting_category"
+                    && column.schema["x-ui"]["widget"] == "channel" =>
+            {
+                row.insert(column.name.clone(), Value::Null);
+            }
+            Some(Value::Null) => {}
+            Some(value) => {
+                row.insert(column.name.clone(), value);
+            }
+            None if column.kind == Kind::Boolean && raw.is_empty() => {}
+            None => return None,
+        }
+    }
+    Some(row)
 }
 
 #[must_use]
@@ -1224,7 +1298,7 @@ pub(crate) fn text_list_should_write(
     let baseline = stored.filter(|value| !value.is_null()).or(effective);
     let baseline = baseline.unwrap_or(&Value::Null);
     let empty =
-        |value: &Value| value.is_null() || value.as_array().is_some_and(|items| items.is_empty());
+        |value: &Value| value.is_null() || value.as_array().is_some_and(Vec::is_empty);
     !(empty(baseline) && empty(value)) && baseline != value
 }
 
@@ -1879,6 +1953,11 @@ mod tests {
 
     #[test]
     fn text_list_questions_keep_items_and_panel_arrays() {
+        text_list_questions_keep_items();
+        nested_panel_questions_keep_items_and_panel_arrays();
+    }
+
+    fn text_list_questions_keep_items() {
         let question = json!({
             "type": "array",
             "maxItems": 5,
@@ -1886,44 +1965,14 @@ mod tests {
             "x-ui": { "widget": "text-list" }
         });
         let module = json!({ "properties": { "config": { "properties": {
-            "questions": question.clone(),
-            "panels": { "type": "array", "maxItems": 5, "items": { "type": "object",
-                "required": ["id"], "properties": {
-                    "id": { "type": "string" },
-                    "staff_roles": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "x-ui": { "level": "basic", "widget": "roles" }
-                    },
-                    "questions": question,
-                    "timezone": { "type": "string" }
-                }
-            }}
+            "questions": question
         }}}});
         let fields = fields(&module);
         let questions = fields
             .iter()
             .find(|field| field.name == "questions")
             .unwrap();
-        let panels = fields.iter().find(|field| field.name == "panels").unwrap();
         assert_eq!(questions.kind, Kind::TextList);
-        let Kind::List(columns) = &panels.kind else {
-            panic!("panels is not a list");
-        };
-        let role_column = columns
-            .iter()
-            .find(|column| column.name == "staff_roles")
-            .unwrap();
-        assert_eq!(role_column.kind, Kind::Roles);
-        assert_eq!(role_column.schema["x-ui"]["level"], "basic");
-        assert_eq!(
-            columns
-                .iter()
-                .find(|column| column.name == "questions")
-                .unwrap()
-                .kind,
-            Kind::TextList
-        );
 
         let values = HashMap::from([
             ("questions.0".to_owned(), "What, do you need?".to_owned()),
@@ -1982,6 +2031,48 @@ mod tests {
             Some(&json!(["first", "second"])),
             None
         ));
+    }
+
+    fn nested_panel_questions_keep_items_and_panel_arrays() {
+        let question = json!({
+            "type": "array",
+            "maxItems": 5,
+            "items": { "type": "string", "minLength": 1, "maxLength": 45 },
+            "x-ui": { "widget": "text-list" }
+        });
+        let module = json!({ "properties": { "config": { "properties": {
+            "panels": { "type": "array", "maxItems": 5, "items": { "type": "object",
+                "required": ["id"], "properties": {
+                    "id": { "type": "string" },
+                    "staff_roles": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "x-ui": { "level": "basic", "widget": "roles" }
+                    },
+                    "questions": question,
+                    "timezone": { "type": "string" }
+                }
+            }}
+        }}}});
+        let fields = fields(&module);
+        let panels = fields.iter().find(|field| field.name == "panels").unwrap();
+        let Kind::List(columns) = &panels.kind else {
+            panic!("panels is not a list");
+        };
+        let role_column = columns
+            .iter()
+            .find(|column| column.name == "staff_roles")
+            .unwrap();
+        assert_eq!(role_column.kind, Kind::Roles);
+        assert_eq!(role_column.schema["x-ui"]["level"], "basic");
+        assert_eq!(
+            columns
+                .iter()
+                .find(|column| column.name == "questions")
+                .unwrap()
+                .kind,
+            Kind::TextList
+        );
 
         let nested = HashMap::from([
             ("panels.0.id".to_owned(), "billing".to_owned()),

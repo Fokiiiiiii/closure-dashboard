@@ -375,7 +375,7 @@ fn render(
     }
     let mut directory = data.directory.clone();
     if module == "tickets" {
-        let directory = directory.get_or_insert_with(|| Value::Object(Default::default()));
+        let directory = directory.get_or_insert_with(|| Value::Object(serde_json::Map::default()));
         directory["ticket_staff_teams"] =
             data.effective["modules"]["tickets"]["config"]["staff_teams"].clone();
         directory["ticket_forms"] = data.effective["forms"].clone();
@@ -474,7 +474,7 @@ pub(super) async fn save(
     save_part(State(app), Path((id, module, String::new())), headers, form).await
 }
 
-fn form_question_options(prefix: &str, input: &HashMap<String, String>) -> Option<Value> {
+fn form_question_options(prefix: &str, input: &HashMap<String, String>) -> Value {
     let prefix = format!("{prefix}.options.");
     let mut numbers: Vec<usize> = input
         .keys()
@@ -505,7 +505,7 @@ fn form_question_options(prefix: &str, input: &HashMap<String, String>) -> Optio
             options.push(Value::Object(option));
         }
     }
-    Some(Value::Array(options))
+    Value::Array(options)
 }
 
 fn insert_form_question_string(
@@ -540,6 +540,7 @@ fn insert_form_question_number(
     Some(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Option<String> {
     if input.contains_key(field_name) {
         return None;
@@ -662,7 +663,7 @@ fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Opt
                     insert_form_question_number(&mut question, &row, "max_length", input)?;
                 }
                 "string_select" | "radio_group" | "checkbox_group" => {
-                    question.insert("options".to_owned(), form_question_options(&row, input)?);
+                    question.insert("options".to_owned(), form_question_options(&row, input));
                     if kind != "radio_group" {
                         insert_form_question_number(&mut question, &row, "min_values", input)?;
                         insert_form_question_number(&mut question, &row, "max_values", input)?;
@@ -713,7 +714,7 @@ fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<Stri
                         .iter()
                         .filter(|column| column.kind == form::Kind::FormQuestions)
                     {
-                        let cell = format!("{}{}.", prefix, row);
+                        let cell = format!("{prefix}{row}.");
                         let cell = format!("{cell}{}", column.name);
                         if input.contains_key(&cell)
                             || input.keys().any(|key| key.starts_with(&format!("{cell}.")))
@@ -814,9 +815,7 @@ fn ticket_hours_error(
     fields: &[form::Field],
     config: &Value,
 ) -> Option<(&'static str, &'static str)> {
-    let Some(field) = fields.iter().find(|field| field.name == "hours") else {
-        return None;
-    };
+    let field = fields.iter().find(|field| field.name == "hours")?;
     let form::Kind::List(columns) = &field.kind else {
         return None;
     };

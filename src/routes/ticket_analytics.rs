@@ -117,10 +117,10 @@ pub(super) async fn page(
     let Some(state) = data.get("state").filter(|state| valid_state(state, days)) else {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::UNAVAILABLE, &headers);
     };
-    let name = guilds
-        .ok()
-        .map(|(guilds, _)| guild_name(&guilds, &id).to_owned())
-        .unwrap_or_else(|| id.clone());
+    let name = guilds.ok().map_or_else(
+        || id.clone(),
+        |(guilds, _)| guild_name(&guilds, &id).to_owned(),
+    );
 
     Html(views::ticket_analytics_page(
         l, &headers, &id, &name, days, state,

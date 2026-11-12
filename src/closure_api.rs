@@ -145,6 +145,7 @@ impl Api {
     ///
     /// # Errors
     /// Returns a sanitized API or transport error.
+    #[allow(clippy::too_many_arguments)]
     async fn request_keyed(
         &self,
         method: Method,
@@ -525,6 +526,7 @@ impl Api {
 
     /// # Errors
     /// Returns a sanitized API or transport error.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ticket_history_action(
         &self,
         guild: &str,
@@ -764,6 +766,9 @@ impl Api {
         .await
     }
 
+    /// # Errors
+    /// Returns an error if the query is invalid or the API request fails.
+    #[allow(clippy::too_many_arguments)]
     pub async fn gallery_templates(
         &self,
         guild: &str,
@@ -942,6 +947,8 @@ impl Api {
         .await
     }
 
+    /// # Errors
+    /// Returns an error if the cursor or query is invalid or the API request fails.
     pub async fn ticket_knowledge_state(
         &self,
         guild: &str,
@@ -1161,6 +1168,9 @@ impl Api {
         .await
     }
 
+    /// # Errors
+    /// Returns an error if the page is invalid or either audit source fails.
+    #[allow(clippy::too_many_lines)]
     pub async fn ticket_audit_search(
         &self,
         guild: &str,
@@ -1170,24 +1180,24 @@ impl Api {
     ) -> Result<(Value, Option<String>), ApiError> {
         let page = data.get("page").and_then(Value::as_u64).unwrap_or(0);
         let page_size = data.get("page_size").and_then(Value::as_u64).unwrap_or(0);
-        if !(1..=100).contains(&page) || !(1..=25).contains(&page_size) {
-            return Err(ApiError::new(
+        let invalid_page = || {
+            ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid audit page".into(),
                 Vec::new(),
-            ));
+            )
+        };
+        if !(1..=100).contains(&page) || !(1..=25).contains(&page_size) {
+            return Err(invalid_page());
         }
         let limit = page
             .checked_mul(page_size)
             .filter(|limit| *limit <= 2_500)
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid audit page".into(),
-                    Vec::new(),
-                )
-            })?;
+            .ok_or_else(invalid_page)?;
+        let database_limit = u32::try_from(limit).map_err(|_| invalid_page())?;
         let offset = (page - 1) * page_size;
+        let offset_index = usize::try_from(offset).map_err(|_| invalid_page())?;
+        let page_size_index = usize::try_from(page_size).map_err(|_| invalid_page())?;
         let mut plugin_data = data.clone();
         plugin_data["page"] = serde_json::json!(1);
         plugin_data["page_size"] = serde_json::json!(limit);
@@ -1216,7 +1226,7 @@ impl Api {
             .as_u64()
             .ok_or_else(ApiError::unavailable)?;
         let (database_response, _) = self
-            .ticket_db_audit_events(guild, &data, limit as u32, actor)
+            .ticket_db_audit_events(guild, &data, database_limit, actor)
             .await?;
         let database_entries = database_response["entries"]
             .as_array()
@@ -1239,8 +1249,8 @@ impl Api {
         });
         let current_entries = entries
             .into_iter()
-            .skip(offset as usize)
-            .take(page_size as usize)
+            .skip(offset_index)
+            .take(page_size_index)
             .collect::<Vec<_>>();
         let total = plugin_total.saturating_add(database_total);
         let has_more = offset + (current_entries.len() as u64) < total || truncated;
@@ -1294,6 +1304,9 @@ impl Api {
         ))
     }
 
+    /// # Errors
+    /// Returns an error if the scope or action is invalid or the API request fails.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ticket_action(
         &self,
         guild: &str,
