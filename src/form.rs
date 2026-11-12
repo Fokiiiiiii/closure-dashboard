@@ -17,6 +17,8 @@ pub enum Kind {
     TextList,
     /// Form questions stored as legacy strings or tagged objects, preserving their JSON structure.
     FormQuestions,
+    /// An ordered array of object rows nested inside a list row.
+    NestedList(Vec<Column>),
     /// `false`, `true`, or role ids told apart by commas.
     FlagOrRoles,
     /// A message with embeds, edited in the composer; the variables its texts may use.
@@ -299,13 +301,19 @@ fn is_form_questions_schema(schema: &Value) -> bool {
 }
 
 /// The columns of a list: the required ones first, then the rest; `None` when one is of a kind the form cannot show.
-fn columns(items: &Value) -> Option<Vec<Column>> {
+pub(crate) fn columns(items: &Value) -> Option<Vec<Column>> {
     let properties = items["properties"].as_object()?;
+    let visible = |name: &str| {
+        properties.get(name).is_some_and(|schema| {
+            schema["x-ui"]["widget"] != "hidden" && schema["readOnly"] != true
+        })
+    };
     let required: Vec<&str> = items["required"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
+        .filter(|name| visible(name))
         .collect();
     let names = required
         .iter()
@@ -315,7 +323,7 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
             properties
                 .keys()
                 .map(String::as_str)
-                .filter(|name| !required.contains(name)),
+                .filter(|name| !required.contains(name) && visible(name)),
         );
     names
         .map(|name| {
@@ -338,6 +346,14 @@ fn columns(items: &Value) -> Option<Vec<Column>> {
                     ),
                     None => Kind::String,
                 },
+                "array"
+                    if matches!(
+                        schema["x-ui"]["widget"].as_str(),
+                        Some("access-rules" | "embed-fields" | "nested-list")
+                    ) =>
+                {
+                    Kind::NestedList(columns(&schema["items"])?)
+                }
                 "array"
                     if schema["items"]["type"] == "string"
                         && schema["x-ui"]["widget"] == "roles" =>
@@ -671,9 +687,12 @@ pub fn parse(field: &Field, input: &str) -> Option<Value> {
             (min..=max).contains(&n).then(|| json!(n))
         }
         Kind::FormQuestions => parse_form_questions(field, input),
-        Kind::List(_) | Kind::Entries | Kind::TextList | Kind::Structured | Kind::Message(_) => {
-            None
-        }
+        Kind::List(_)
+        | Kind::NestedList(_)
+        | Kind::Entries
+        | Kind::TextList
+        | Kind::Structured
+        | Kind::Message(_) => None,
         Kind::FlagOrRoles => match input.trim() {
             "true" => Some(json!(true)),
             "false" => Some(json!(false)),
@@ -846,10 +865,11 @@ pub fn rows<S: std::hash::BuildHasher>(
     input: &HashMap<String, String, S>,
 ) -> Option<Value> {
     let prefix = format!("{}.", field.name);
-    if columns
-        .iter()
-        .any(|column| column.kind == Kind::TextList || column.kind == Kind::FormQuestions)
-    {
+    if columns.iter().any(|column| {
+        column.kind == Kind::TextList
+            || column.kind == Kind::FormQuestions
+            || matches!(&column.kind, &Kind::NestedList(_))
+    }) {
         for key in input.keys().filter(|key| key.starts_with(&prefix)) {
             let mut parts = key.strip_prefix(&prefix)?.split('.');
             let _row = parts.next()?.parse::<usize>().ok()?;
@@ -858,6 +878,16 @@ pub fn rows<S: std::hash::BuildHasher>(
                     if parts.next().is_none()
                         && input.get(key).is_some_and(|value| value == "1") => {}
                 Some(name) => {
+                    if let Some(list_name) = name.strip_suffix("_present") {
+                        if columns.iter().any(|column| {
+                            column.name == list_name && matches!(&column.kind, &Kind::NestedList(_))
+                        }) && parts.next().is_none()
+                            && input.get(key).is_some_and(|value| value == "1")
+                        {
+                            continue;
+                        }
+                        return None;
+                    }
                     let column = columns.iter().find(|column| column.name == name)?;
                     match &column.kind {
                         Kind::TextList => {
@@ -867,6 +897,27 @@ pub fn rows<S: std::hash::BuildHasher>(
                                 Some("x")
                                     if parts.next().is_none()
                                         && input.get(key).is_some_and(|value| value == "1") => {}
+                                _ => return None,
+                            }
+                        }
+                        Kind::NestedList(nested_columns) => {
+                            let nested_row = parts.next()?.parse::<usize>().ok()?;
+                            if column.schema["maxItems"]
+                                .as_u64()
+                                .is_some_and(|maximum| nested_row as u64 >= maximum)
+                            {
+                                return None;
+                            }
+                            match parts.next() {
+                                Some("x")
+                                    if parts.next().is_none()
+                                        && input.get(key).is_some_and(|value| value == "1") => {}
+                                Some("order")
+                                    if column.schema["x-ui"]["widget"] == "access-rules"
+                                        && parts.next().is_none() => {}
+                                Some(name)
+                                    if nested_columns.iter().any(|nested| nested.name == name)
+                                        && parts.next().is_none() => {}
                                 _ => return None,
                             }
                         }
@@ -939,7 +990,9 @@ pub fn rows<S: std::hash::BuildHasher>(
         .collect();
     numbers.sort_unstable();
     numbers.dedup();
+    let ordered_access_rules = field.schema["x-ui"]["widget"] == "access-rules";
     let mut rows = Vec::new();
+    let mut access_rules = Vec::<(usize, usize, Value)>::new();
     for number in numbers {
         let key = |column: &str| format!("{prefix}{number}.{column}");
         if input.get(&key("x")).is_some_and(|v| v == "1") {
@@ -969,16 +1022,43 @@ pub fn rows<S: std::hash::BuildHasher>(
                 let mut cell = cell.clone();
                 cell.name = cell_name;
                 text_list(&cell, input)
+            } else if let Kind::NestedList(nested_columns) = &column.kind {
+                let nested = Field {
+                    name: cell_name.clone(),
+                    label: column.name.clone(),
+                    kind: Kind::List(nested_columns.clone()),
+                    schema: column.schema.clone(),
+                };
+                let nested_rows = rows(&nested, nested_columns, input)?;
+                if column.schema["x-ui"]["widget"] == "access-rules" {
+                    let mut seen = HashSet::new();
+                    if nested_rows
+                        .as_array()?
+                        .iter()
+                        .any(|rule| !rule["role_id"].as_str().is_some_and(|id| seen.insert(id)))
+                    {
+                        return None;
+                    }
+                }
+                Some(nested_rows)
             } else {
                 parse(&cell, raw)
             };
             match parsed {
                 Some(Value::Array(values))
-                    if (column.kind == Kind::TextList || column.kind == Kind::FormQuestions)
+                    if (column.kind == Kind::TextList
+                        || column.kind == Kind::FormQuestions
+                        || matches!(&column.kind, Kind::NestedList(_)))
                         && values.is_empty()
                         && !column.required
                         && row.values().all(Value::is_null) => {}
-                Some(Value::Null) if column.schema["x-ui"]["widget"] == "ticket-panel" => {
+                Some(Value::Null)
+                    if matches!(
+                        column.schema["x-ui"]["widget"].as_str(),
+                        Some("ticket-panel" | "ticket-form")
+                    ) || column.name == "waiting_category"
+                        && column.schema["x-ui"]["widget"] == "channel" =>
+                {
                     row.insert(column.name.clone(), Value::Null);
                 }
                 Some(Value::Null) => {}
@@ -990,7 +1070,10 @@ pub fn rows<S: std::hash::BuildHasher>(
             }
         }
         if !columns.iter().any(|column| {
-            !is_preset(&column.kind) && row.get(&column.name).is_some_and(|value| !value.is_null())
+            !is_preset(&column.kind)
+                && row.get(&column.name).is_some_and(|value| {
+                    !value.is_null() && !value.as_array().is_some_and(Vec::is_empty)
+                })
         }) {
             continue;
         }
@@ -1000,18 +1083,40 @@ pub fn rows<S: std::hash::BuildHasher>(
         {
             return None;
         }
-        rows.push(Value::Object(row));
+        let row = Value::Object(row);
+        if ordered_access_rules {
+            let order = input.get(&key("order")).map_or(Some(number), |value| {
+                value.parse::<usize>().ok()?.checked_sub(1)
+            })?;
+            access_rules.push((order, number, row));
+        } else {
+            rows.push(row);
+        }
+    }
+    if ordered_access_rules {
+        access_rules.sort_by_key(|(order, row, _)| (*order, *row));
+        if access_rules.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return None;
+        }
+        return Some(Value::Array(
+            access_rules.into_iter().map(|(_, _, row)| row).collect(),
+        ));
     }
     Some(Value::Array(rows))
 }
 
 #[must_use]
 pub(crate) fn text_list_limit(field: &Field) -> usize {
+    let maximum = if field.name.rsplit('.').next() == Some("close_reasons") {
+        25
+    } else {
+        TEXT_LIST_LIMIT
+    };
     field.schema["maxItems"]
         .as_u64()
         .and_then(|limit| usize::try_from(limit).ok())
-        .unwrap_or(TEXT_LIST_LIMIT)
-        .min(TEXT_LIST_LIMIT)
+        .unwrap_or(maximum)
+        .min(maximum)
 }
 
 #[must_use]

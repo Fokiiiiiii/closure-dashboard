@@ -22,12 +22,22 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, io::Read, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod audit_log;
 mod cases;
 mod composer;
 mod editor;
 mod modules;
+mod public_knowledge;
 mod settings;
+mod tags;
+mod ticket_actions;
+mod ticket_analytics;
+mod ticket_gallery;
+mod ticket_knowledge;
+mod ticket_notifications;
+mod ticket_settings;
 mod tickets;
+mod transcripts;
 
 #[derive(Clone)]
 struct App {
@@ -153,11 +163,86 @@ pub fn router(config: Config) -> Router {
         .route("/logout", post(logout))
         .route("/g/{id}", get(guild))
         .route("/g/{id}/history", get(history_page))
+        .route("/knowledge/{guild}", get(public_knowledge::list))
+        .route("/knowledge/{guild}/{slug}", get(public_knowledge::article))
         .route("/g/{id}/cases", get(cases::list))
         .route("/g/{id}/cases/export", get(cases::export))
         .route("/g/{id}/cases/note", post(cases::add_note))
         .route("/g/{id}/tickets", get(tickets::list))
+        .route(
+            "/g/{id}/tickets/actions",
+            post(ticket_actions::bulk_perform),
+        )
+        .route("/g/{id}/tickets/analytics", get(ticket_analytics::page))
+        .route("/g/{id}/tickets/tags", get(tags::list))
+        .route("/g/{id}/tickets/tags/actions", post(tags::action))
+        .route("/g/{id}/tickets/audit-log", get(audit_log::page))
+        .route("/g/{id}/transcripts", get(transcripts::page))
+        .route("/g/{id}/transcripts/actions", post(transcripts::action))
+        .route(
+            "/g/{id}/transcripts/labels/actions",
+            post(transcripts::label_action),
+        )
+        .route("/g/{id}/tickets/gallery", get(ticket_gallery::browse))
+        .route(
+            "/g/{id}/tickets/gallery/templates/{template_id}",
+            get(ticket_gallery::detail),
+        )
+        .route(
+            "/g/{id}/tickets/gallery/submissions",
+            get(ticket_gallery::submissions),
+        )
+        .route(
+            "/g/{id}/tickets/gallery/publish",
+            get(ticket_gallery::publish).post(ticket_gallery::publish_post),
+        )
+        .route(
+            "/g/{id}/tickets/gallery/import",
+            post(ticket_gallery::import),
+        )
+        .route(
+            "/g/{id}/tickets/gallery/submissions/actions",
+            post(ticket_gallery::submission_action),
+        )
+        .route("/notifications", get(ticket_notifications::list))
+        .route("/notifications/actions", post(ticket_notifications::action))
+        .route(
+            "/settings/notifications",
+            get(ticket_notifications::settings),
+        )
+        .route(
+            "/settings/notifications/actions",
+            post(ticket_notifications::settings_action),
+        )
         .route("/g/{id}/tickets/{channel_id}", get(tickets::one))
+        .route(
+            "/g/{id}/tickets/{channel_id}/actions",
+            post(ticket_actions::perform),
+        )
+        .route(
+            "/g/{id}/tickets/settings",
+            get(ticket_settings::edit).post(ticket_settings::save),
+        )
+        .route(
+            "/g/{id}/tickets/settings/blacklist",
+            get(ticket_settings::blacklist),
+        )
+        .route(
+            "/g/{id}/tickets/settings/blacklist/actions",
+            post(ticket_settings::blacklist_action_route),
+        )
+        .route(
+            "/g/{id}/tickets/settings/integrations/actions",
+            post(ticket_settings::integration_secret_action_route),
+        )
+        .route(
+            "/g/{id}/tickets/settings/knowledge",
+            get(ticket_knowledge::list),
+        )
+        .route(
+            "/g/{id}/tickets/settings/knowledge/actions",
+            post(ticket_knowledge::action),
+        )
         .route(
             "/g/{id}/cases/{number}",
             get(cases::one).post(cases::change),
@@ -302,6 +387,29 @@ fn cases_read(method: &Method, path: &str) -> bool {
             .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
 }
 
+fn public_knowledge_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    let Some(path) = path.strip_prefix("/knowledge/") else {
+        return false;
+    };
+    let mut segments = path.split('/');
+    let Some(_guild) = segments.next().filter(|guild| session::snowflake(guild)) else {
+        return false;
+    };
+    match (segments.next(), segments.next()) {
+        (None, None) => true,
+        (Some(slug), None) => {
+            (1..=32).contains(&slug.len())
+                && slug
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        }
+        _ => false,
+    }
+}
+
 fn tickets_read(method: &Method, path: &str) -> bool {
     if *method != Method::GET {
         return false;
@@ -313,6 +421,102 @@ fn tickets_read(method: &Method, path: &str) -> bool {
         || rest
             .strip_prefix("tickets/")
             .is_some_and(session::snowflake)
+}
+
+fn ticket_action_post(method: &Method, path: &str) -> bool {
+    if *method != Method::POST {
+        return false;
+    }
+    let Some((_, rest)) = path
+        .strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+    else {
+        return false;
+    };
+    if matches!(
+        rest,
+        "tickets/actions"
+            | "tickets/settings/blacklist/actions"
+            | "tickets/settings/integrations/actions"
+            | "tickets/tags/actions"
+            | "transcripts/actions"
+            | "transcripts/labels/actions"
+            | "tickets/gallery/publish"
+            | "tickets/gallery/import"
+            | "tickets/gallery/submissions/actions"
+    ) {
+        return true;
+    }
+    let Some(ticket) = rest.strip_prefix("tickets/") else {
+        return false;
+    };
+    let Some((channel, action)) = ticket.split_once('/') else {
+        return false;
+    };
+    action == "actions" && session::snowflake(channel)
+}
+
+fn ticket_gallery_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    let Some((_, rest)) = path
+        .strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+    else {
+        return false;
+    };
+    matches!(
+        rest,
+        "tickets/gallery" | "tickets/gallery/submissions" | "tickets/gallery/publish"
+    ) || rest
+        .strip_prefix("tickets/gallery/templates/")
+        .is_some_and(|id| !id.contains('/') && id.parse::<i64>().is_ok_and(|id| id > 0))
+}
+
+fn transcripts_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    path.strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(_, rest)| rest == "transcripts")
+}
+
+fn ticket_tags_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    path.strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(_, rest)| rest == "tickets/tags")
+}
+
+fn ticket_audit_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    path.strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(_, rest)| rest == "tickets/audit-log")
+}
+
+fn ticket_analytics_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    path.strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(_, rest)| rest == "tickets/analytics")
+}
+
+fn ticket_blacklist_read(method: &Method, path: &str) -> bool {
+    if *method != Method::GET {
+        return false;
+    }
+    path.strip_prefix("/g/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(_, rest)| rest == "tickets/settings/blacklist")
 }
 
 async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
@@ -331,9 +535,17 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
     let path = request.uri().path();
     let read_cases = cases_read(request.method(), path);
     let read_tickets = tickets_read(request.method(), path);
+    let ticket_action = ticket_action_post(request.method(), path);
+    let blacklist_page = ticket_blacklist_read(request.method(), path);
+    let analytics_read = ticket_analytics_read(request.method(), path);
+    let tags_read = ticket_tags_read(request.method(), path);
+    let transcripts_read = transcripts_read(request.method(), path);
+    let gallery_read = ticket_gallery_read(request.method(), path);
+    let audit_read = ticket_audit_read(request.method(), path);
     let language = lang(request.headers(), &app);
     let public = matches!(path, "/login" | "/app.css" | "/app.js" | "/healthz")
-        || path.starts_with("/auth/");
+        || path.starts_with("/auth/")
+        || public_knowledge_read(request.method(), path);
     let mut response = if request.method() == Method::POST && !csrf(request.headers(), &app) {
         error_page(
             StatusCode::FORBIDDEN,
@@ -356,7 +568,14 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
                 Ok((access, _))
                     if access["allowed"] == true
                         || (read_cases && may_view_cases(&access))
-                        || read_tickets =>
+                        || read_tickets
+                        || ticket_action
+                        || blacklist_page
+                        || analytics_read
+                        || tags_read
+                        || audit_read
+                        || transcripts_read
+                        || gallery_read =>
                 {
                     run(next, request).await
                 }

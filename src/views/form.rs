@@ -279,6 +279,37 @@ pub(super) fn section_title(l: Locale<'_>, key: &str) -> String {
 
 /// The shown text of one choice: translated when it is a value the dashboard knows, else as sent.
 fn enum_label(l: Locale<'_>, field: &Field, value: &str) -> String {
+    if field.name.rsplit('.').next() == Some("channel_name_scheme") {
+        let key = match value {
+            "id" => "opt-id",
+            "username" => "opt-username",
+            "id_username" => "opt-id_username",
+            "nickname" => "opt-nickname",
+            "id_padded" => "opt-id_padded",
+            "custom" => "opt-custom",
+            _ => return escape(value),
+        };
+        return l.text(key);
+    }
+    if field.name.contains(".access_rules.") {
+        let key = match value {
+            "allow" => "opt-allow",
+            "deny" => "opt-deny",
+            _ => return escape(value),
+        };
+        return l.text(key);
+    }
+    if field.name.starts_with("integrations.") {
+        let key = match (field.name.rsplit('.').next(), value) {
+            (Some("auth"), "none") => "config-tickets-integration-auth-none",
+            (Some("auth"), "bearer") => "config-tickets-integration-auth-bearer",
+            (Some("auth"), "api_key") => "config-tickets-integration-auth-api-key",
+            (Some("method"), "get") => "config-tickets-integration-method-get",
+            (Some("method"), "post") => "config-tickets-integration-method-post",
+            _ => return escape(value),
+        };
+        return l.text(key);
+    }
     if field.name.rsplit('.').next() == Some("weekday") {
         let key = match value {
             "monday" => "hours-weekday-monday",
@@ -335,16 +366,73 @@ pub(super) fn control(
         }
     );
     let widget = field.schema["x-ui"]["widget"].as_str().unwrap_or("");
-    if let Some(directory) = directory
-        && matches!(widget, "channel" | "role")
-    {
+    if widget == "ticket-form" {
+        let mut result = format!("<select {attrs}>");
+        option(
+            &mut result,
+            "",
+            &l.text("tickets-form-inline"),
+            value.is_empty(),
+        );
+        let mut found = value.is_empty();
+        let mut seen = HashSet::new();
+        for definition in directory
+            .and_then(|directory| directory["ticket_forms"].as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(form_id) = definition["id"]
+                .as_str()
+                .filter(|form_id| !form_id.is_empty())
+            else {
+                continue;
+            };
+            if !seen.insert(form_id) {
+                continue;
+            }
+            let selected = form_id == value;
+            found |= selected;
+            let title = definition["title"]
+                .as_str()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .unwrap_or(form_id);
+            option(&mut result, form_id, title, selected);
+        }
+        if !found {
+            let label = l.with_text("tickets-form-unknown", "id", value);
+            option(&mut result, value, &label, true);
+        }
+        result.push_str("</select>");
+        return result;
+    }
+    if matches!(widget, "channel" | "role") {
+        let list = directory.and_then(|directory| {
+            if widget == "channel" {
+                directory["channels"].as_array()
+            } else {
+                directory["roles"].as_array()
+            }
+        });
+        let Some(list) = list else {
+            let unavailable = if widget == "role" {
+                l.text(keys::TICKET_ACCESS_ROLE_PICKER_UNAVAILABLE)
+            } else {
+                l.text(keys::UNAVAILABLE)
+            };
+            let displayed = if value.is_empty() {
+                escape(&l.text(keys::UNSET))
+            } else {
+                escape(value)
+            };
+            return format!(
+                "<input type=\"hidden\" name=\"{name}\" value=\"{}\"><span id=\"{id}\" class=\"mono\">{displayed}</span><span class=\"settings-help\">{}</span>",
+                escape(value),
+                escape(&unavailable)
+            );
+        };
         let mut result = format!("<select {attrs}>");
         option(&mut result, "", &l.text(keys::UNSET), value.is_empty());
-        let list = if widget == "channel" {
-            &directory["channels"]
-        } else {
-            &directory["roles"]
-        };
         let mut found = value.is_empty();
         let kinds: Vec<&str> = field.schema["x-ui"]["channel_kinds"]
             .as_array()
@@ -352,7 +440,7 @@ pub(super) fn control(
                 || vec!["text"],
                 |kinds| kinds.iter().filter_map(Value::as_str).collect(),
             );
-        for item in list.as_array().into_iter().flatten() {
+        for item in list {
             if (widget == "channel"
                 && !item["kind"]
                     .as_str()
@@ -450,6 +538,7 @@ pub(super) fn control(
             )
         }
         Kind::List(_)
+        | Kind::NestedList(_)
         | Kind::Entries
         | Kind::TextList
         | Kind::FormQuestions
@@ -545,11 +634,43 @@ fn message_row(l: Locale<'_>, id: &str, module: &str, field: &Field, current: &V
 
 /// The caption of one column of a list.
 fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
-    l.text(match name {
+    let key = match name {
         "id" if panel => keys::COL_PANEL_ID,
         "name" if panel => "col-panel-name",
         "description" if panel => "col-panel-description",
         "button_style" if panel => "col-panel-button-style",
+        "title" if panel => "tickets-title",
+        "color" if panel => "tickets-color",
+        "content" if panel => "tickets-content",
+        "welcome_title" => "tickets-welcome-title",
+        "welcome_title_url" => "tickets-welcome-title-url",
+        "welcome_description" => "tickets-welcome-description",
+        "welcome_color" => "tickets-welcome-color",
+        "welcome_author_name" => "tickets-welcome-author-name",
+        "welcome_author_url" => "tickets-welcome-author-url",
+        "welcome_author_icon_url" => "tickets-welcome-author-icon-url",
+        "welcome_thumbnail_url" => "tickets-welcome-thumbnail-url",
+        "welcome_image_url" => "tickets-welcome-image-url",
+        "welcome_footer_text" => "tickets-welcome-footer-text",
+        "welcome_footer_icon_url" => "tickets-welcome-footer-icon-url",
+        "welcome_timestamp" => "tickets-welcome-timestamp",
+        "welcome_fields" if panel => "tickets-welcome-fields",
+        "rating_enabled" => "tickets-rating-enabled",
+        "close_reasons" => "tickets-close-reasons",
+        "allow_custom_close_reasons" => "tickets-allow-custom-close-reasons",
+        "channel_name_scheme" => "tickets-channel-name-scheme",
+        "channel_name_custom" => "tickets-channel-name-custom",
+        "open_cooldown_seconds" => "tickets-open-cooldown-seconds",
+        "access_rules" if panel => "tickets-access-rules",
+        "role_id" => keys::COL_ROLE,
+        "name" => keys::COL_NAME,
+        "value" => keys::COL_TEXT,
+        "inline" => keys::CP_INLINE,
+        "headers" => "config-tickets-integration-headers",
+        "secrets" => "config-tickets-integration-secrets",
+        "response_mappings" => "config-tickets-integration-response-mappings",
+        "value_template" => "config-tickets-integration-header-value-template",
+        "path" => "config-tickets-integration-mapping-path",
         "channel" => keys::COL_CHANNEL,
         "role" => keys::COL_ROLE,
         "level" => keys::COL_LEVEL,
@@ -573,9 +694,17 @@ fn column_title(l: Locale<'_>, name: &str, panel: bool) -> String {
         "staff_roles" => keys::COL_STAFF_ROLES,
         "log_channel" => keys::COL_LOG_CHANNEL,
         "close_after_days" => keys::COL_CLOSE_AFTER_DAYS,
+        "waiting_after_hours" => "tickets-waiting-after-hours",
+        "first_response_timeout_hours" => "tickets-first-response-timeout-hours",
+        "last_message_timeout_hours" => "tickets-last-message-timeout-hours",
+        "waiting_category" => "tickets-waiting-category",
+        "staff_teams" => "tickets-staff-teams",
+        "exit_survey" => "tickets-exit-survey",
+        "form_id" if panel => "tickets-form-id",
         "questions" => keys::COL_QUESTIONS,
         _ => return escape(name),
-    })
+    };
+    l.text(key)
 }
 
 fn role_value_text(value: Option<&Value>) -> String {
@@ -947,6 +1076,114 @@ fn list_rows(data: &ListEditorData<'_>) -> (usize, Vec<ListRow>) {
     (current_len, rows)
 }
 
+fn ticket_teams_control(
+    l: Locale<'_>,
+    field: &Field,
+    control_index: &str,
+    title: &str,
+    value: &str,
+    directory: Option<&Value>,
+) -> Option<String> {
+    let teams = directory
+        .and_then(|directory| directory.get("ticket_staff_teams"))
+        .and_then(Value::as_array);
+    let name = escape(&format!("f.{}", field.name));
+    let caption = format!("field-{control_index}-caption");
+    let selected: HashSet<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|team| !team.is_empty() && *team != "-")
+        .collect();
+    let mut found = HashSet::new();
+    let mut out = format!(
+        "<div class=\"list-cell list-team-picker\"><span id=\"{caption}\" class=\"list-caption\">{title}</span><div class=\"role-list\" role=\"group\" aria-labelledby=\"{caption}\"><input type=\"hidden\" name=\"{name}\" value=\"\">"
+    );
+    let default_selected = selected.contains("default");
+    found.insert("default");
+    let _ = write!(
+        out,
+        "<label class=\"role-option\"><input type=\"checkbox\" name=\"{name}\" value=\"default\"{}>{}</label>",
+        if default_selected { " checked" } else { "" },
+        l.text("ticket-team-default")
+    );
+    if let Some(teams) = teams {
+        for team in teams {
+            let Some(id) = team["id"].as_str().filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            if !found.insert(id) {
+                continue;
+            }
+            let checked = selected.contains(id);
+            let label = team["name"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(id);
+            let _ = write!(
+                out,
+                "<label class=\"role-option\"><input type=\"checkbox\" name=\"{name}\" value=\"{}\"{}>{}</label>",
+                escape(id),
+                if checked { " checked" } else { "" },
+                escape(label)
+            );
+        }
+    } else {
+        let _ = write!(
+            out,
+            "<p class=\"settings-help\">{}</p>",
+            l.text("ticket-team-picker-unavailable")
+        );
+    }
+    for team in selected.iter().filter(|team| !found.contains(**team)) {
+        let label = l.with_text("ticket-team-unknown", "id", team);
+        let _ = write!(
+            out,
+            "<label class=\"role-option\"><input type=\"checkbox\" name=\"{name}\" value=\"{}\" checked>{label}</label>",
+            escape(team)
+        );
+    }
+    out.push_str("</div></div>");
+    Some(out)
+}
+
+fn nested_role_unavailable(
+    l: Locale<'_>,
+    cell: &Field,
+    control_index: &str,
+    title: &str,
+    value: &str,
+) -> String {
+    format!(
+        "<div class=\"list-cell\"><span id=\"field-{control_index}-caption\" class=\"list-caption\">{title}</span><input type=\"hidden\" name=\"f.{}\" value=\"{}\"><span class=\"mono\">{}</span><p class=\"settings-help\">{}</p></div>",
+        escape(&cell.name),
+        escape(value),
+        escape(value),
+        l.text("ticket-access-role-picker-unavailable")
+    )
+}
+
+fn list_column_description(l: Locale<'_>, schema: &Value) -> Option<String> {
+    let description = schema["description"]
+        .as_str()
+        .filter(|value| !value.is_empty())?;
+    let key_like = description
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    let description = if key_like {
+        l.text(description)
+    } else {
+        super::first_sentence(description)
+    };
+    Some(escape(&description))
+}
+
+fn uses_schema_descriptions(field: &str) -> bool {
+    field == "panels"
+        || field.starts_with("panels.")
+        || field == "integrations"
+        || field.starts_with("integrations.")
+}
+
 fn list_cell_control(
     l: Locale<'_>,
     data: &ListEditorData<'_>,
@@ -955,7 +1192,25 @@ fn list_cell_control(
     column: &Column,
     text: &str,
 ) -> String {
-    let title = column_title(l, &column.name, data.field.name == "panels");
+    let title = match (data.field.name.as_str(), column.name.as_str()) {
+        ("integrations", "id") => l.text("config-tickets-integration-id"),
+        ("integrations", "url") => l.text("config-tickets-integration-url"),
+        ("integrations", "auth") => l.text("config-tickets-integration-auth"),
+        ("integrations", "method") => l.text("config-tickets-integration-method"),
+        ("integrations", "headers") => l.text("config-tickets-integration-headers"),
+        ("integrations", "secrets") => l.text("config-tickets-integration-secrets"),
+        ("integrations", "response_mappings") => {
+            l.text("config-tickets-integration-response-mappings")
+        }
+        ("integrations", "send_form_data") => l.text("config-tickets-integration-send-form-data"),
+        _ if data.field.name.ends_with(".access_rules") && column.name == "role_id" => {
+            l.text(keys::TICKETS_ACCESS_RULE_ROLE)
+        }
+        _ if data.field.name.ends_with(".access_rules") && column.name == "action" => {
+            l.text(keys::TICKETS_ACCESS_RULE_ACTION)
+        }
+        _ => column_title(l, &column.name, data.field.name == "panels"),
+    };
     let mut out = String::new();
     if column.schema["x-ui"]["widget"] == "ticket-panel" {
         let id = format!("field-{control_index}");
@@ -964,6 +1219,25 @@ fn list_cell_control(
             out,
             "<label class=\"list-cell\"><span class=\"list-caption\">{title}</span>{panel_control}</label>"
         );
+    } else if column.schema["x-ui"]["widget"] == "ticket-staff-teams"
+        && let Some(control) =
+            ticket_teams_control(l, cell, control_index, &title, text, data.directory)
+    {
+        out.push_str(&control);
+    } else if column.schema["x-ui"]["widget"] == "role"
+        && data.field.name.ends_with(".access_rules")
+        && data
+            .directory
+            .and_then(|directory| directory["roles"].as_array())
+            .is_none()
+    {
+        out.push_str(&nested_role_unavailable(
+            l,
+            cell,
+            control_index,
+            &title,
+            text,
+        ));
     } else if column.schema["x-ui"]["widget"] == "time-minute" {
         let id = format!("field-{control_index}");
         let caption_id = format!("{id}-caption");
@@ -984,7 +1258,108 @@ fn list_cell_control(
             control(l, cell, control_index, text, data.directory, false)
         );
     }
+    if uses_schema_descriptions(&data.field.name)
+        && let Some(help) = list_column_description(l, &column.schema)
+    {
+        let _ = write!(out, "<small class=\"settings-help\">{help}</small>");
+    }
     out
+}
+
+fn nested_list_editor(
+    l: Locale<'_>,
+    data: &ListEditorData<'_>,
+    cell: &Field,
+    control_index: &str,
+    column: &Column,
+    title: &str,
+) -> String {
+    let Kind::NestedList(columns) = &column.kind else {
+        return String::new();
+    };
+    let prefix = format!("{}.", data.field.name);
+    let outer_row = cell
+        .name
+        .strip_prefix(&prefix)
+        .and_then(|rest| rest.split('.').next())
+        .and_then(|row| row.parse::<usize>().ok())
+        .unwrap_or(0);
+    let current = data
+        .current
+        .as_array()
+        .and_then(|rows| rows.get(outer_row))
+        .and_then(|row| row.get(&column.name))
+        .unwrap_or(&Value::Null);
+    let stored = data
+        .stored
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.get(outer_row))
+        .and_then(|row| row.get(&column.name))
+        .filter(|value| !value.is_null());
+    let nested = Field {
+        name: cell.name.clone(),
+        label: column.name.clone(),
+        kind: Kind::List(columns.clone()),
+        schema: column.schema.clone(),
+    };
+    let column_index = control_index
+        .rsplit('-')
+        .next()
+        .and_then(|index| index.parse::<usize>().ok())
+        .unwrap_or(0);
+    let index = data
+        .index
+        .saturating_mul(1_000_000)
+        .saturating_add(outer_row.saturating_mul(1_000))
+        .saturating_add(column_index);
+    let editor = list_editor(
+        l,
+        &ListEditorData {
+            field: &nested,
+            columns,
+            index,
+            current,
+            stored,
+            input: data.input,
+            directory: data.directory,
+            panel_options: data.panel_options,
+        },
+    );
+    let mut out = format!(
+        "<fieldset class=\"list-cell list-nested-list\"><legend>{title}</legend><input type=\"hidden\" name=\"f.{}_present\" value=\"1\">",
+        escape(&nested.name)
+    );
+    if let Some(help) = list_column_description(l, &column.schema) {
+        let _ = write!(out, "<p class=\"settings-help\">{help}</p>");
+    }
+    out.push_str(&editor);
+    out.push_str("</fieldset>");
+    out
+}
+
+pub(crate) fn config_list_editor(
+    l: Locale<'_>,
+    field: &Field,
+    columns: &[Column],
+    index: usize,
+    current: &Value,
+    stored: Option<&Value>,
+    input: &HashMap<String, String>,
+    directory: Option<&Value>,
+) -> String {
+    list_editor(
+        l,
+        &ListEditorData {
+            field,
+            columns,
+            index,
+            current,
+            stored,
+            input,
+            directory,
+            panel_options: None,
+        },
+    )
 }
 
 fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &ListRow) -> String {
@@ -1059,6 +1434,11 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
                 "<div class=\"list-cell list-text-list\"><span class=\"list-caption\">{}</span>{editor}</div>",
                 column_title(l, &column.name, data.field.name == "panels")
             );
+            if uses_schema_descriptions(&data.field.name)
+                && let Some(help) = list_column_description(l, &column.schema)
+            {
+                let _ = write!(out, "<p class=\"settings-help\">{help}</p>");
+            }
         } else if column.kind == form::Kind::FormQuestions {
             let current = data
                 .current
@@ -1073,6 +1453,20 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
                 r#"<div class="list-cell list-form-questions"><span class="list-caption">{}</span>{editor}</div>"#,
                 column_title(l, &column.name, data.field.name == "panels")
             );
+            if uses_schema_descriptions(&data.field.name)
+                && let Some(help) = list_column_description(l, &column.schema)
+            {
+                let _ = write!(out, "<p class=\"settings-help\">{help}</p>");
+            }
+        } else if matches!(&column.kind, Kind::NestedList(_)) {
+            out.push_str(&nested_list_editor(
+                l,
+                data,
+                &cell,
+                &control_index,
+                column,
+                &column_title(l, &column.name, data.field.name == "panels"),
+            ));
         } else {
             out.push_str(&list_cell_control(
                 l,
@@ -1096,6 +1490,21 @@ fn list_row(l: Locale<'_>, data: &ListEditorData<'_>, current_len: usize, row: &
             l.text(keys::COL_REMOVE),
             escape(&format!("f.{prefix}{}.x", row.number)),
             if row.removed { " checked" } else { "" }
+        );
+    }
+    if data.field.schema["x-ui"]["widget"] == "access-rules" {
+        let order_key = format!("{prefix}{}.order", row.number);
+        let order = data
+            .input
+            .get(&order_key)
+            .cloned()
+            .unwrap_or_else(|| (row.number + 1).to_string());
+        let maximum = current_len.saturating_add(1).max(1);
+        let _ = write!(
+            out,
+            "<label class=\"list-cell list-rule-order\"><span class=\"list-caption\">{}</span><input type=\"number\" min=\"1\" max=\"{maximum}\" name=\"f.{order_key}\" value=\"{}\"></label>",
+            l.text(keys::TICKETS_ACCESS_RULE_ORDER),
+            escape(&order)
         );
     }
     out.push_str("</div>");

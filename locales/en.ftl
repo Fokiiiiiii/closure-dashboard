@@ -631,6 +631,248 @@ ticket-transcript-truncated = Some messages are omitted from the saved transcrip
 ticket-transcript-previous = Previous part
 ticket-transcript-next = Next part
 ticket-back = Back to tickets
+ticket-actions-title = Ticket actions
+ticket-actions-updated = Ticket updated.
+ticket-actions-unavailable = Ticket actions are unavailable right now.
+ticket-actions-waiting-for-reply = Waiting for the user's reply.
+ticket-actions-close-request = A close request is pending.
+ticket-actions-labels = Labels
+ticket-actions-reason = Reason (optional)
+ticket-actions-close = Close ticket
+ticket-actions-request-close = Request closure
+ticket-actions-message = Message
+ticket-actions-reply = Send reply
+ticket-actions-label = Label
+ticket-actions-add-label = Add label
+ticket-actions-remove-label = Remove label
+ticket-settings-blacklist = Ticket blacklist
+ticket-blacklist-guild = Server-wide
+ticket-blacklist-scope-help = Members and roles listed here cannot open tickets within this scope.
+ticket-blacklist-user = User
+ticket-blacklist-role = Role
+ticket-blacklist-saved = Ticket blacklist updated.
+ticket-blacklist-remove = Remove
+ticket-blacklist-add-role = Block role
+ticket-blacklist-user-search = Search members
+ticket-blacklist-add-user = Block member
+ticket-members-refine-search = Showing up to 25 matches. Refine your search to find other members.
+ticket-team-users = Staff members
+ticket-team-user-search = Search server members
+ticket-team-search = Search
+ticket-team-users-none = No matching members found.
+ticket-team-search-save-help = Search server members and save the selected users.
+ticket-settings-staff-teams = Staff teams
+ticket-settings-blacklist-open = Open blacklist settings
+ticket-team-existing = Existing teams
+ticket-team-new = New team
+ticket-team-name = Team name
+ticket-team-roles = Staff roles
+ticket-team-roles-unavailable = Roles are unavailable.
+ticket-team-permissions = Permissions
+ticket-team-remove = Remove team
+ticket-team-default = Default team
+ticket-team-unknown = Unknown team: { $id }
+ticket-team-picker-unavailable = Could not load the team list.
+ticket-team-permission-add_reactions = Add reactions
+ticket-team-permission-send_messages = Send messages
+ticket-team-permission-send_tts_messages = Send text-to-speech messages
+ticket-team-permission-embed_links = Embed links
+ticket-team-permission-attach_files = Attach files
+ticket-team-permission-mention_everyone = Mention @everyone and @here
+ticket-team-permission-use_external_emojis = Use external emojis
+ticket-team-permission-use_application_commands = Use application commands
+ticket-team-permission-use_external_stickers = Use external stickers
+ticket-team-permission-send_voice_messages = Send voice messages
+tickets-staff-teams = Staff teams
+tickets-exit-survey = Exit survey
+tickets-waiting-after-hours = Waiting message after hours
+tickets-first-response-timeout-hours = First response timeout (hours)
+tickets-last-message-timeout-hours = Last message timeout (hours)
+tickets-waiting-category = Waiting category
+tickets-form-id = Question form
+tickets-form-id-help = Choose inline questions or a saved form.
+tickets-form-inline = Inline questions
+tickets-form-unknown = Saved form { $id } is unavailable.
+config-tickets-integrations = Integrations
+config-tickets-form-dynamic-options = Dynamic options
+config-tickets-form-dynamic-options-integration = Integration
+config-tickets-form-dynamic-options-items_pointer = Items JSON Pointer
+config-tickets-form-dynamic-options-label_pointer = Label JSON Pointer
+config-tickets-form-dynamic-options-value_pointer = Value JSON Pointer
+config-tickets-form-dynamic-options-description_pointer = Description JSON Pointer
+config-tickets-integration-id = Integration ID
+config-tickets-integration-url = Integration URL
+config-tickets-integration-auth = Authentication mode
+config-tickets-integration-secret-help = Secrets are encrypted by the host and write-only. Set, replace, or remove a value below; its contents are never returned or shown again.
+ticket-settings-knowledge-help = Manage knowledge articles using the page below.
+ticket-settings-knowledge-open = Manage knowledge articles
+ticket-settings-module = Ticket settings
+ticket-settings-module-help = Configure ticket panels and staff behavior.
+ticket-settings-module-open = Open ticket settings
+ticket-knowledge-title = Ticket knowledge
+ticket-knowledge-back = Back to ticket settings
+ticket-knowledge-search = Search articles
+ticket-knowledge-search-submit = Search
+ticket-knowledge-create = Create article
+ticket-knowledge-id = Article ID
+ticket-knowledge-article-title = Title
+ticket-knowledge-body = Article body
+ticket-knowledge-categories = Categories
+ticket-knowledge-keywords = Keywords
+ticket-knowledge-published = Publish article
+ticket-knowledge-custom-embed = Custom embed JSON
+ticket-knowledge-public-link = View public article
+ticket-knowledge-save = Save article
+ticket-knowledge-delete = Delete article
+ticket-knowledge-none = No knowledge articles match.
+ticket-knowledge-saved = Knowledge base updated.
+ticket-knowledge-previous = Previous page
+ticket-knowledge-next = Next page
+ticket-knowledge-unavailable = This article cannot be edited. Reload the page.
+ticket-analytics = Analytics
+ticket-analytics-title = Ticket analytics
+ticket-analytics-range = { $start } – { $end }
+ticket-analytics-data-incomplete = Some accessible history records could not be read. Totals may omit them.
+ticket-analytics-rating-bucket = { $score } stars
+ticket-analytics-back = Back to tickets
+ticket-analytics-period = Period
+ticket-analytics-7-days = Last 7 days
+ticket-analytics-30-days = Last 30 days
+ticket-analytics-90-days = Last 90 days
+ticket-analytics-submit = Show
+ticket-analytics-closed = Closed in period
+ticket-analytics-open = Currently open tickets you can access
+ticket-analytics-duration = Resolution time
+ticket-analytics-duration-samples = Valid duration samples
+ticket-analytics-duration-missing = Missing or invalid timestamps
+ticket-analytics-duration-average = Average resolution time
+ticket-analytics-ratings = Ratings
+ticket-analytics-ratings-count = Ratings recorded
+ticket-analytics-ratings-missing = Closed tickets without a valid rating
+ticket-analytics-ratings-average = Average rating
+ticket-analytics-rating-distribution = Rating distribution
+ticket-analytics-records-scanned = Accessible history records scanned
+ticket-analytics-incomplete = Partial totals: more accessible history is still being scanned.
+ticket-analytics-complete = History scan complete.
+ticket-analytics-retained-scope = Closed-ticket history is retained for up to one year. Current open tickets are counted separately.
+ticket-analytics-no-ratings = No valid ratings were recorded in this period.
+ticket-analytics-continue = Continue scan
+ticket-analytics-loading = Scanning accessible ticket history…
+ticket-analytics-filtered-scope = Results include only tickets you can access.
+ticket-bulk-select = Select
+ticket-bulk-actions = Bulk ticket actions
+ticket-bulk-action = Action
+ticket-bulk-run = Run action
+ticket-bulk-select-required = Select at least one ticket.
+ticket-bulk-results = Bulk action results
+ticket-bulk-back = Back to tickets
+ticket-bulk-result = Result
+ticket-bulk-status = Status
+ticket-bulk-succeeded = Succeeded
+ticket-bulk-failed = Failed
+public-knowledge-title = Knowledge Base
+public-knowledge-search = Search articles
+public-knowledge-search-submit = Search
+public-knowledge-search-hint = Search titles, article text, categories, and keywords.
+public-knowledge-category = Category
+public-knowledge-all-categories = All categories
+public-knowledge-keywords = Keywords
+public-knowledge-no-results = No published articles match this search.
+public-knowledge-next = More articles
+public-knowledge-back = Back to Knowledge Base
+public-knowledge-not-found = This published article is unavailable.
+ticket-settings-integrations = Integrations
+ticket-integration-secret-help = Secrets are encrypted by the host and write-only. Set, replace, or remove a value below; its contents are never returned or shown again.
+ticket-integration-secret-status = Secret status
+ticket-integration-secret-status-unavailable = Secret status is unavailable. The host vault may not be configured.
+ticket-integration-secret-saved = Secret updated.
+ticket-integration-secret-configured = Secret configured
+ticket-integration-secret-missing = No secret configured
+ticket-integration-secret-value = Secret value
+ticket-integration-secret-set = Save secret
+ticket-integration-secret-remove = Remove secret
+ticket-integration-secrets-owner-only = Only the server owner or an administrator can manage integration secrets.
+ticket-integration-generation-missing = Save the integration settings before editing its secret.
+ticket-integration-delete-owner-only = A configured integration secret can be removed only by the server owner or an administrator.
+config-tickets-integration-method = Request method
+config-tickets-integration-headers = Headers
+config-tickets-integration-header-name = Header name
+config-tickets-integration-header-value-template = Header value template
+config-tickets-integration-secrets = Secret names
+config-tickets-integration-secret-name = Secret name
+config-tickets-integration-response-mappings = Response mappings
+config-tickets-integration-mapping-name = Mapping name
+config-tickets-integration-mapping-path = JSON response path
+config-tickets-integration-auth-none = No authentication
+config-tickets-integration-auth-bearer = Bearer
+config-tickets-integration-auth-api-key = API key
+config-tickets-integration-method-get = GET
+config-tickets-integration-method-post = POST
+ticket-settings-knowledge-categories-help = Enter one category per line.
+ticket-settings-knowledge-keywords-help = Enter one keyword per line.
+ticket-settings-knowledge-published-help = Published articles can be read on the public Knowledge Base. Draft articles are not visible there.
+ticket-settings-knowledge-custom-embed-help = Optional JSON embed used by bot replies. Leave blank to use the article title and text.
+config-tickets-integration-send-form-data = Send form data
+tickets-title = Panel title
+tickets-color = Panel color
+tickets-content = Panel content
+tickets-panel-title = Panel title
+tickets-panel-color = Panel color
+tickets-panel-content = Panel content
+tickets-welcome-fields = Welcome embed fields
+tickets-welcome-title = Embed title
+tickets-welcome-title-url = Embed title URL
+tickets-welcome-color = Embed color
+tickets-welcome-description = Embed description
+tickets-welcome-author-name = Author name
+tickets-welcome-author-url = Author URL
+tickets-welcome-author-icon-url = Author icon URL
+tickets-welcome-thumbnail-url = Thumbnail URL
+tickets-welcome-image-url = Image URL
+tickets-welcome-footer-text = Footer text
+tickets-welcome-footer-icon-url = Footer icon URL
+tickets-welcome-timestamp = Show timestamp
+tickets-welcome-inline = Inline field
+tickets-rating-enabled = Enable ticket ratings
+tickets-close-reasons = Close reasons
+tickets-allow-custom-close-reasons = Allow custom close reasons
+tickets-channel-name-scheme = Channel name scheme
+tickets-channel-name-custom = Custom channel name scheme
+tickets-open-cooldown-seconds = Open-ticket cooldown (seconds)
+tickets-access-rules = Access rules
+tickets-access-rules-help = Rules are checked in order; the first matching rule decides. With no matching rules, access is allowed. Put an @everyone deny rule first to deny access by default.
+tickets-access-role = Role
+tickets-access-action = Action
+tickets-access-rule-order = Priority (first rule is 1)
+tickets-access-allow = Allow
+tickets-access-deny = Deny
+tickets-panel-settings-invalid = The panel settings are invalid.
+tickets-panel-access-denied = You do not have access to open this panel.
+tickets-panel-cooldown = Try again in { $seconds } seconds.
+tickets-close-reason-invalid = Choose a valid close reason.
+ticket-access-role-picker-unavailable = Role list is unavailable; saved role IDs are preserved.
+opt-id = ID
+opt-username = Username
+opt-id_username = ID and username
+opt-nickname = Nickname
+opt-id_padded = Padded ID
+opt-custom = Custom
+opt-allow = Allow
+opt-deny = Deny
+config-tickets-panel-id = Panel ID
+config-tickets-panel-name = Panel name
+config-tickets-panel-description = Panel description
+config-tickets-panel-button_style = Button style
+config-tickets-panel-staff = Staff roles
+config-tickets-panel-staff_teams = Staff teams
+config-tickets-panel-max_open = Maximum open tickets
+config-tickets-panel-timezone = Time zone
+config-tickets-panel-waiting_after_hours = Move waiting tickets after hours
+config-tickets-panel-first_response_timeout_hours = First-response timeout (hours)
+config-tickets-panel-last_message_timeout_hours = Last-message timeout (hours)
+config-tickets-panel-waiting_category = Waiting category
+config-tickets-panel-questions = Ticket questions
+config-tickets-panel-exit_survey = Exit survey
 ticket-more = Show more
 cases = Cases
 cases-none = No cases match.
@@ -664,3 +906,297 @@ case-last-days = Last { $n } days
 case-only-moderators = The cases are for the moderators of the server.
 case-bad-filter = The search could not be understood. Check the member ID and the other fields.
 case-needs-edit = Changing cases needs the permission to edit the dashboard.
+
+ticket-audit-log = Audit log
+ticket-audit-user-id = User ID
+ticket-audit-action-type = Action type
+ticket-audit-resource-type = Resource type
+ticket-audit-result = Result
+ticket-audit-date-from = Date from
+ticket-audit-date-to = Date to
+ticket-audit-apply-filters = Apply filters
+ticket-audit-all-actions = All actions
+ticket-audit-all-resources = All resources
+ticket-audit-all-results = All results
+ticket-audit-count = Showing { $first }–{ $last } of { $total }
+ticket-audit-count-truncated = Showing { $first }–{ $last } of at least { $total }; the scan limit was reached.
+ticket-audit-entries = Audit entries
+ticket-audit-timestamp = Timestamp
+ticket-audit-action = Action
+ticket-audit-resource = Resource
+ticket-audit-outcome = Outcome
+ticket-audit-empty = No entries match these filters.
+ticket-audit-privacy = Sensitive details and configuration payloads are not shown.
+ticket-audit-pages-label = Audit log pages
+ticket-audit-previous = Previous
+ticket-audit-next = Next
+ticket-audit-page = Page { $page }
+ticket-audit-system = System
+ticket-audit-incomplete = Some records may be outside the scan limit; refine the date range to see a complete result.
+ticket-audit-action-label = { $action ->
+    [settings_update] Update settings
+    [panel_create] Create panel
+    [panel_update] Update panel
+    [panel_delete] Delete panel
+    [panel_resend] Resend panel
+    [multi_panel_create] Create multi-panel setup
+    [multi_panel_update] Update multi-panel setup
+    [multi_panel_delete] Delete multi-panel setup
+    [form_create] Create form
+    [form_update] Update form
+    [form_delete] Delete form
+    [tag_create] Create tag
+    [tag_update] Update tag
+    [tag_clone] Clone tag
+    [tag_delete] Delete tag
+    [team_create] Create staff team
+    [team_update] Update staff team
+    [team_delete] Delete staff team
+    [team_member_add] Add team member
+    [team_member_remove] Remove team member
+    [blacklist_add] Add blacklist entry
+    [blacklist_remove] Remove blacklist entry
+    [blacklist_remove_user] Remove user from blacklist
+    [blacklist_remove_role] Remove role from blacklist
+    [ticket_send_message] Send ticket message
+    [ticket_close] Close ticket
+    [ticket_close_request] Request ticket closure
+    [ticket_label_create] Create label
+    [ticket_label_delete] Delete label
+    [ticket_label_assign] Assign label
+    [ticket_claim] Claim ticket
+    [ticket_unclaim] Release ticket claim
+    [ticket_transfer] Transfer ticket
+    [ticket_rename] Rename ticket
+    [ticket_panel_change] Change ticket panel
+    [ticket_waiting_update] Update waiting status
+    [ticket_member_add] Add ticket member
+    [ticket_member_remove] Remove ticket member
+    [ticket_history_update] Update transcript metadata
+    [staff_note_add] Add staff note
+    [knowledge_create] Create knowledge article
+    [knowledge_update] Update knowledge article
+    [knowledge_delete] Delete knowledge article
+    [support_hours_update] Update support hours
+    [integration_secret_set] Set integration secret
+    [integration_secret_remove] Remove integration secret
+    [gallery_import] Import gallery template
+    [gallery_export] Export gallery source
+   *[other] { $action }
+}
+ticket-audit-resource-label = { $resource ->
+    [settings] Settings
+    [panel] Ticket panel
+    [multi_panel] Multi-panel setup
+    [form] Question form
+    [tag] Ticket tag
+    [team] Staff team
+    [blacklist] Blacklist
+    [ticket] Ticket
+    [ticket_label] Ticket label
+    [knowledge] Knowledge article
+    [support_hours] Support hours
+    [integration_secret] Integration secret
+    [ticket_history] Ticket transcript
+    [gallery] Template gallery
+    [ticket_note] Staff note
+   *[other] { $resource }
+}
+ticket-audit-outcome-label = { $outcome ->
+    [success] Success
+    [failure] Failed
+    [uncertain] Uncertain
+   *[other] { $outcome }
+}
+ticket-audit-resource-label = Resource: { $resource }
+ticket-audit-outcome-label = Result: { $outcome }
+ticket-tags-title = Ticket tags
+ticket-tags-back = Back to tickets
+ticket-tags-search = Search tags
+ticket-tags-search-submit = Search
+ticket-tags-article-search = Search published knowledge articles
+ticket-tags-article-next = More articles
+ticket-tags-article-first = First articles
+ticket-tags-article-unavailable = This linked article is no longer published. The tag’s saved text and embed remain available.
+ticket-tags-create = Create tag
+ticket-tags-id = Tag ID
+ticket-tags-body = Text
+ticket-tags-embed = Embed JSON
+ticket-tags-embed-help = Enter JSON with title, color as #RRGGBB, description, author_name, author_url, author_icon_url, thumbnail_url, image_url, footer_text, footer_icon_url, footer_timestamp, and fields containing name, value, and inline.
+ticket-tags-alias = Create a custom slash command alias
+ticket-tags-alias-help = When enabled, this tag can also be used with a slash command named after its Tag ID.
+ticket-tags-alias-sync-pending = The slash command alias is syncing and may not be available yet.
+ticket-tags-article = Published article
+ticket-tags-article-none = No linked article
+ticket-tags-save = Save tag
+ticket-tags-edit = Edit
+ticket-tags-clone = Clone
+ticket-tags-clone-id = New tag ID
+ticket-tags-delete = Delete
+ticket-tags-delete-confirm = Confirm deletion
+ticket-tags-empty = No tags match this search.
+ticket-tags-saved = Tag saved.
+ticket-tags-type-text = Text
+ticket-tags-type-embed = Embed
+ticket-tags-type-embed-text = Text and embed
+ticket-tags-unavailable = Tag data is unavailable.
+ticket-tags-next = More tags
+ticket-tags-publish = Publish to Gallery
+
+ticket-transcripts = Transcripts
+ticket-transcripts-filters = Filters
+ticket-transcripts-total = Matching tickets
+ticket-transcripts-ticket-id = Ticket number
+ticket-transcripts-username = Username
+ticket-transcripts-user-id = User ID
+ticket-transcripts-closed-by = Closed by
+ticket-transcripts-panel = Panel
+ticket-transcripts-rating = Rating
+ticket-transcripts-claimed-by = Claimed by
+ticket-transcripts-close-reason = Close reason
+ticket-transcripts-labels = Labels
+ticket-transcripts-view = View transcript
+ticket-transcripts-edit-reason = Edit close reason
+ticket-transcripts-no-reason = No reason recorded
+ticket-transcripts-no-rating = Not rated
+ticket-transcripts-no-transcript = Transcript unavailable
+ticket-transcripts-manage-labels = Manage labels
+ticket-transcripts-label-name = Label name
+ticket-transcripts-label-color = Label color
+ticket-transcripts-create-label = Create label
+ticket-transcripts-delete-label = Delete label
+ticket-transcripts-save = Save
+ticket-transcripts-cancel = Cancel
+ticket-transcripts-syncing = Updating label definitions…
+ticket-transcripts-backfill-incomplete = Label definitions are still being synchronized.
+ticket-transcripts-filter = Apply filters
+ticket-transcripts-next = Next page
+ticket-transcripts-total-partial = The count may be incomplete because the scan reached its limit.
+ticket-transcripts-username-limit = Username search matched only the first page of members; refine the query.
+ticket-transcripts-updated = Ticket updated.
+ticket-transcripts-actions = Actions
+ticket-transcripts-add-label = Add label
+ticket-transcripts-remove-label = Remove label
+ticket-transcripts-more-labels = More labels
+ticket-transcripts-no-results = No transcripts match these filters.
+ticket-transcripts-previous = Previous page
+ticket-transcripts-any = Any
+ticket-transcripts-no-labels = No labels
+ticket-transcripts-first = First page
+ticket-transcripts-columns = Columns
+
+ticket-gallery-title = Template gallery
+ticket-gallery-search = Search templates
+ticket-gallery-type = Type
+ticket-gallery-type-all = All types
+ticket-gallery-type-panel = Panel
+ticket-gallery-type-tag = Tag
+ticket-gallery-type-form = Form
+ticket-gallery-category = Category
+ticket-gallery-category-all = All categories
+ticket-gallery-category-support = Support
+ticket-gallery-category-moderation = Moderation
+ticket-gallery-category-sales = Sales
+ticket-gallery-category-applications = Applications
+ticket-gallery-category-feedback = Feedback
+ticket-gallery-category-general = General
+ticket-gallery-category-other = Other
+ticket-gallery-sort = Sort by
+ticket-gallery-sort-newest = Newest
+ticket-gallery-sort-popular = Most popular
+ticket-gallery-clear = Clear filters
+ticket-gallery-featured = Featured
+ticket-gallery-import-count = Imports
+ticket-gallery-author = Author
+ticket-gallery-open = Open
+ticket-gallery-back = Back
+ticket-gallery-empty = No approved templates match these filters.
+ticket-gallery-import-panel = Import panel
+ticket-gallery-import-tag = Import tag
+ticket-gallery-import-form = Import form
+ticket-gallery-import-id = New item ID
+ticket-gallery-publish = Submit a template
+ticket-gallery-name = Name
+ticket-gallery-description = Description
+ticket-gallery-tags = Tags
+ticket-gallery-author-name = Display name
+ticket-gallery-share-consent = I agree to share a sanitized copy of this item in the public gallery.
+ticket-gallery-submit = Submit for review
+ticket-gallery-sources = Your available sources
+ticket-gallery-no-sources = No eligible sources are available.
+ticket-gallery-submissions = My submissions
+ticket-gallery-submissions-empty = You have no submissions.
+ticket-gallery-status-pending = Pending review
+ticket-gallery-status-approved = Approved
+ticket-gallery-status-rejected = Rejected
+ticket-gallery-status-withdrawn = Withdrawn
+ticket-gallery-status-unpublished = Unpublished
+ticket-gallery-rejection-reason = Review note
+ticket-gallery-edit = Edit submission
+ticket-gallery-withdraw = Withdraw
+ticket-gallery-unpublish = Unpublish
+ticket-gallery-saved = Submission saved.
+ticket-gallery-more = More templates
+ticket-gallery-panel-title = Panel title
+ticket-gallery-panel-content = Panel content
+ticket-gallery-welcome-message = Welcome message
+ticket-gallery-select-source = Select source
+ticket-gallery-published = Published
+ticket-gallery-pages = Gallery pages
+
+notifications-title = Notifications
+notifications-empty = You have no notifications.
+notifications-unread-count = { $count } unread
+notifications-mark-read = Mark as read
+notifications-mark-all-read = Mark all as read
+notifications-all = All
+notifications-integrations = Integrations
+notifications-today = Today
+notifications-yesterday = Yesterday
+notifications-this-week = This week
+notifications-earlier = Earlier
+notifications-previous = Previous
+notifications-next = Next
+notification-settings-title = Notification settings
+notification-settings-in-app = In-app notifications
+notification-settings-discord-dm = Discord direct messages
+notification-settings-email = Email notifications
+notification-settings-save = Save preferences
+notification-settings-email-not-configured = Email delivery is not configured on this host.
+notification-settings-email-needs-verified = Verify your address before enabling email notifications.
+notification-settings-email-address = Email address
+notification-settings-email-code = Verification code
+notification-settings-email-send-code = Send verification code
+notification-settings-email-verify = Verify email
+notification-settings-email-remove = Remove email address
+notification-settings-email-confirm-remove = Confirm that you want to remove this address
+notification-settings-email-verified = Email address verified
+notification-settings-email-pending = Verification pending
+notification-settings-email-help = Your address is encrypted and write-only; only a masked address is shown.
+notification-settings-action-error = The notification change could not be saved. Refresh and try again.
+notifications-unread = Unread
+notifications-older = Older
+notifications-newest = Newest
+notifications-category-integrations = Integrations
+notifications-category-gallery = Gallery
+notification-in-app = In-app notifications
+notification-discord-dm = Discord direct messages
+notification-discord-dm-help = You must allow DMs from the bot to receive Discord DM notifications.
+notification-email = Email notifications
+notification-email-help = Your email address is used only for transactional notifications. We will not send marketing emails.
+notification-email-not-configured = Email delivery is not configured on this host.
+notification-email-needs-verified = Verify your address before enabling email notifications.
+notification-email-address = Email address
+notification-email-code = Verification code
+notification-email-send-code = Send verification code
+notification-email-verify = Verify email
+notification-email-remove = Remove email address
+notification-email-confirm-remove = Confirm that you want to remove this address
+notification-email-verified = Email address verified
+notification-email-pending = Verification pending
+notification-gallery-approved = Your gallery submission was approved
+notification-gallery-rejected = Your gallery submission was rejected
+notification-gallery-reason = Reason
+notification-email-save = Save email settings
+notification-email-resend = Resend code
+notification-save = Save preferences

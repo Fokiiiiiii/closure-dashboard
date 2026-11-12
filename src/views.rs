@@ -86,6 +86,7 @@ pub(crate) fn servers(
     page(l, headers, &body)
 }
 
+mod audit_log;
 mod cases;
 mod charts;
 mod composer;
@@ -95,8 +96,17 @@ mod history;
 mod modules;
 mod overview;
 mod permissions;
+mod public_knowledge;
 mod settings;
+mod tags;
+mod ticket_actions;
+mod ticket_analytics;
+mod ticket_gallery;
+mod ticket_knowledge;
+mod ticket_notifications;
+mod ticket_settings;
 mod tickets;
+mod transcripts;
 
 /// The path of a page's line icon, shared by the sidebar and the page heading.
 fn page_icon(key: &str) -> &'static str {
@@ -112,6 +122,14 @@ fn page_icon(key: &str) -> &'static str {
         keys::CASES => "M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5",
         keys::TICKETS => {
             "M3 8a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2a2 2 0 000-4zM13 6v12"
+        }
+        keys::TICKET_TAGS_TITLE => "M20 12l-8 8-9-9V3h8z M7 7h.01",
+        keys::TICKET_AUDIT_LOG => "M4 4h16v16H4z M8 9h8 M8 13h8 M8 17h5",
+        keys::TICKET_TRANSCRIPTS => "M4 5h16 M4 12h16 M4 19h16 M8 3v4 M16 10v4 M8 17v4",
+        keys::TICKET_GALLERY_TITLE => "M4 6h16v14H4z M4 10h16 M8 6V4h8v2",
+        keys::NOTIFICATIONS_TITLE => "M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9 M10 21h4",
+        keys::NOTIFICATION_SETTINGS_TITLE => {
+            "M12 8a4 4 0 100 8 4 4 0 000-8z M19.4 15a1.7 1.7 0 000-6l-1-.6.1-1.2a1.7 1.7 0 00-2.9-1.2l-1 .8a1.7 1.7 0 00-3.2 0l-1-.8a1.7 1.7 0 00-2.9 1.2l.1 1.2-1 .6a1.7 1.7 0 000 3.4l1 .6-.1 1.2a1.7 1.7 0 002.9 1.2l1-.8a1.7 1.7 0 003.2 0l1 .8a1.7 1.7 0 002.9-1.2l-.1-1.2z"
         }
         _ => "",
     }
@@ -178,6 +196,7 @@ fn first_sentence(description: &str) -> String {
     }
 }
 
+pub(crate) use audit_log::page as audit_log_page;
 pub(crate) use cases::{
     CasesPage, Filter as CaseFilter, SOURCES as CASE_SOURCES, STATES as CASE_STATES,
     case as case_page, cases as cases_page,
@@ -195,8 +214,26 @@ pub(crate) use history::history;
 pub(crate) use modules::{feature_toggle, modules_page, part_name};
 pub(crate) use overview::overview;
 pub(crate) use permissions::permissions;
+pub(crate) use public_knowledge::{
+    public_knowledge_article_page, public_knowledge_not_found_page, public_knowledge_page,
+};
 pub(crate) use settings::{SettingsPage, settings_page};
-pub(crate) use tickets::{ticket as ticket_page, tickets as tickets_page};
+pub(crate) use tags::{tags_page, tags_preview};
+pub(crate) use ticket_actions::ActionTokens;
+pub(crate) use ticket_analytics::ticket_analytics_page;
+pub(crate) use ticket_gallery::{
+    ticket_gallery_detail, ticket_gallery_page, ticket_gallery_publish, ticket_gallery_submissions,
+};
+pub(crate) use ticket_knowledge::ticket_knowledge_page;
+pub(crate) use ticket_notifications::{
+    ticket_notification_settings_page, ticket_notifications_page,
+};
+pub(crate) use ticket_settings::{TicketSettingsPage, ticket_blacklist_page, ticket_settings_page};
+pub(crate) use tickets::{ticket as ticket_page, ticket_bulk_results, tickets as tickets_page};
+pub(crate) use transcripts::{
+    TRANSCRIPT_COLUMNS, TranscriptActionTokens, TranscriptFilters, TranscriptLabelTokens,
+    TranscriptPageData, transcripts_page,
+};
 
 pub(crate) fn shell(
     l: Locale<'_>,
@@ -215,6 +252,12 @@ pub(crate) fn shell(
         ("/settings", keys::SERVER_SETTINGS),
         ("/cases", keys::CASES),
         ("/tickets", keys::TICKETS),
+        ("/tickets/tags", keys::TICKET_TAGS_TITLE),
+        ("/tickets/audit-log", keys::TICKET_AUDIT_LOG),
+        ("/transcripts", keys::TICKET_TRANSCRIPTS),
+        ("/tickets/gallery", keys::TICKET_GALLERY_TITLE),
+        ("/notifications", keys::NOTIFICATIONS_TITLE),
+        ("/settings/notifications", keys::NOTIFICATION_SETTINGS_TITLE),
         ("/history", keys::HISTORY),
         ("/permissions", keys::PERMISSIONS),
     ] {
@@ -223,10 +266,14 @@ pub(crate) fn shell(
         } else {
             ""
         };
+        let href = if matches!(path, "/notifications" | "/settings/notifications") {
+            path.to_owned()
+        } else {
+            format!("/g/{}{path}", escape(id))
+        };
         let _ = write!(
             nav,
-            "<a href=\"/g/{}{path}\"{active}>{}{}</a>",
-            escape(id),
+            "<a href=\"{href}\"{active}>{}{}</a>",
             icon(page_icon(key), 16, "nav-icon"),
             l.text(key)
         );

@@ -235,6 +235,16 @@ th { color:var(--muted); font-size:12px; font-weight:500; white-space:nowrap; }
 td { overflow-wrap:anywhere; }
 .mono { color:var(--muted); font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .ticket-transcript { margin:0; padding:16px; overflow:auto; max-block-size:65vh; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ticket-message { padding:16px; margin-block:10px; }
+.ticket-message-heading { display:flex; align-items:baseline; gap:8px; margin-block-end:8px; }
+.ticket-message-content { white-space:pre-wrap; overflow-wrap:anywhere; }
+.ticket-message-attachments,.ticket-message-components { display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; margin-block-start:8px; }
+.ticket-attachment-image img,.ticket-embed-image img { display:block; max-inline-size:min(100%,360px); max-block-size:320px; object-fit:contain; border-radius:4px; }
+.ticket-embed { padding:12px; margin-block:10px; border-inline-start:3px solid var(--accent); border-radius:4px; background:var(--field); }
+.ticket-embed-field { margin-block-start:8px; }
+.ticket-embed-field p { margin-block:4px; }
+.label-swatch { inline-size:18px; block-size:18px; padding:0; border:0; background:none; vertical-align:middle; flex:none; }
+
 .reason { max-inline-size:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pill { background:var(--field); color:var(--muted); white-space:nowrap; }
 .permission-panel,.assignment-cards { max-inline-size:760px; }

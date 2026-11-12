@@ -4,6 +4,7 @@ use super::{
     user, valid_module, views,
 };
 use crate::form;
+use std::collections::HashSet;
 
 pub(super) struct Data {
     pub(super) guilds: Value,
@@ -158,6 +159,19 @@ fn role_column<'a>(field: &'a form::Field, name: &str) -> Option<(usize, &'a for
         column.name == column_name
             && column.kind == form::Kind::Roles
             && column.schema["x-ui"]["widget"] == "roles"
+    })?;
+    Some((row, column))
+}
+
+fn team_column<'a>(field: &'a form::Field, name: &str) -> Option<(usize, &'a form::Column)> {
+    let (row, name) = list_cell(field, name)?;
+    let form::Kind::List(columns) = &field.kind else {
+        return None;
+    };
+    let column = columns.iter().find(|column| {
+        column.name == name
+            && column.kind == form::Kind::Words
+            && column.schema["x-ui"]["widget"] == "ticket-staff-teams"
     })?;
     Some((row, column))
 }
@@ -359,6 +373,13 @@ fn render(
             headers,
         );
     }
+    let mut directory = data.directory.clone();
+    if module == "tickets" {
+        let directory = directory.get_or_insert_with(|| Value::Object(Default::default()));
+        directory["ticket_staff_teams"] =
+            data.effective["modules"]["tickets"]["config"]["staff_teams"].clone();
+        directory["ticket_forms"] = data.effective["forms"].clone();
+    }
     let page = views::FormPage {
         id,
         guild: guild_name(&data.guilds, id),
@@ -367,7 +388,7 @@ fn render(
         schema,
         stored: &data.stored,
         effective: &data.effective,
-        directory: data.directory.as_ref(),
+        directory: directory.as_ref(),
         etag: &data.etag,
         input,
         errors,
@@ -850,6 +871,7 @@ pub(super) async fn save_part(
     let fields = form::fields(schema);
     let mut input = HashMap::new();
     let mut role_values = HashMap::<String, Vec<String>>::new();
+    let mut team_values = HashMap::<String, Vec<String>>::new();
     let mut role_modes = HashMap::<String, String>::new();
     let mut etag = None;
     for (name, value) in pairs {
@@ -876,8 +898,11 @@ pub(super) async fn save_part(
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len);
                 let nested_question_editor = columns.iter().any(|cell| {
-                    matches!(cell.kind, form::Kind::TextList | form::Kind::FormQuestions)
-                        && column.strip_prefix(&format!("{}.", cell.name)).is_some()
+                    (matches!(cell.kind, form::Kind::TextList | form::Kind::FormQuestions)
+                        && column.strip_prefix(&format!("{}.", cell.name)).is_some())
+                        || (matches!(&cell.kind, form::Kind::NestedList(_))
+                            && (column.strip_prefix(&format!("{}.", cell.name)).is_some()
+                                || column == format!("{}_present", cell.name)))
                 });
                 if !role_row_allowed(field, row, current_len)
                     || (column != "x"
@@ -886,6 +911,10 @@ pub(super) async fn save_part(
                 {
                     return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
                 }
+            }
+            if team_column(field, name).is_some() {
+                team_values.entry(name.to_owned()).or_default().push(value);
+                continue;
             }
             if role_column(field, name).is_some() || (role_field(field) && field.name == name) {
                 role_values.entry(name.to_owned()).or_default().push(value);
@@ -908,6 +937,62 @@ pub(super) async fn save_part(
     };
     if etag != data.etag {
         return conflict(&app, &headers, &id, &module, part);
+    }
+    let valid_teams: HashSet<String> =
+        data.effective["modules"]["tickets"]["config"]["staff_teams"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|team| team["id"].as_str().map(str::to_owned))
+            .chain(std::iter::once("default".to_owned()))
+            .collect();
+    for (cell, values) in team_values {
+        let Some(field) = fields
+            .iter()
+            .find(|field| team_column(field, &cell).is_some())
+        else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        let Some((row, _)) = team_column(field, &cell) else {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        };
+        let current_len = current_list(&data, &module, field)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        if !role_row_allowed(field, row, current_len) {
+            return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+        }
+        let empty_count = values.iter().filter(|value| value.is_empty()).count();
+        let selected: Vec<&str> = values
+            .iter()
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+            .collect();
+        let unique: HashSet<&str> = selected.iter().copied().collect();
+        let invalid = empty_count > 1
+            || unique.len() != selected.len()
+            || selected.iter().any(|team| !valid_teams.contains(*team));
+        let raw = if selected.is_empty() {
+            "-".to_owned()
+        } else {
+            selected.join(",")
+        };
+        input.insert(cell, raw);
+        if invalid {
+            let errors = HashMap::from([(String::new(), vec![l.text(keys::FIELD_INVALID)])]);
+            return render(
+                &app,
+                &headers,
+                &id,
+                &module,
+                part,
+                &data,
+                &input,
+                &errors,
+                false,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            );
+        }
     }
     for (cell, mode) in &role_modes {
         if mode != "default" && mode != "set" {
