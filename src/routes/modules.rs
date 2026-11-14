@@ -560,7 +560,11 @@ fn insert_form_question_number(
 }
 
 #[allow(clippy::too_many_lines)]
-fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Option<String> {
+fn form_questions_json(
+    field_name: &str,
+    input: &HashMap<String, String>,
+    stored: Option<&Value>,
+) -> Option<String> {
     if input.contains_key(field_name) {
         return None;
     }
@@ -695,6 +699,22 @@ fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Opt
                 _ => return None,
             }
         }
+        // The editor cannot show dynamic options; keep the stored ones of the same question.
+        let stored_question = stored
+            .and_then(Value::as_array)
+            .and_then(|questions| questions.get(number));
+        if let Some(dynamic) = stored_question.and_then(|stored| stored.get("dynamic_options"))
+            && matches!(kind, "string_select" | "radio_group" | "checkbox_group")
+        {
+            if question
+                .get("options")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            {
+                question.remove("options");
+            }
+            question.insert("dynamic_options".to_owned(), dynamic.clone());
+        }
         questions.push(Value::Object(question));
         if questions.len() > form::FORM_QUESTIONS_LIMIT {
             return None;
@@ -703,8 +723,12 @@ fn form_questions_json(field_name: &str, input: &HashMap<String, String>) -> Opt
     Some(Value::Array(questions).to_string())
 }
 
-fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<String, String>) {
-    let mut cells = Vec::new();
+fn prepare_form_question_inputs(
+    fields: &[form::Field],
+    input: &mut HashMap<String, String>,
+    config: &Value,
+) {
+    let mut cells: Vec<(String, Option<Value>)> = Vec::new();
     for field in fields {
         match &field.kind {
             form::Kind::FormQuestions => {
@@ -713,7 +737,7 @@ fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<Stri
                         .keys()
                         .any(|key| key.starts_with(&format!("{}.", field.name)))
                 {
-                    cells.push(field.name.clone());
+                    cells.push((field.name.clone(), config.get(&field.name).cloned()));
                 }
             }
             form::Kind::List(columns)
@@ -738,7 +762,12 @@ fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<Stri
                         if input.contains_key(&cell)
                             || input.keys().any(|key| key.starts_with(&format!("{cell}.")))
                         {
-                            cells.push(cell);
+                            let stored = config
+                                .get(&field.name)
+                                .and_then(|rows| rows.get(row))
+                                .and_then(|question| question.get(&column.name))
+                                .cloned();
+                            cells.push((cell, stored));
                         }
                     }
                 }
@@ -746,10 +775,11 @@ fn prepare_form_question_inputs(fields: &[form::Field], input: &mut HashMap<Stri
             _ => {}
         }
     }
-    cells.sort_unstable();
-    cells.dedup();
-    for cell in cells {
-        let value = form_questions_json(&cell, input).unwrap_or_else(|| "{".to_owned());
+    cells.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    cells.dedup_by(|left, right| left.0 == right.0);
+    for (cell, stored) in cells {
+        let value =
+            form_questions_json(&cell, input, stored.as_ref()).unwrap_or_else(|| "{".to_owned());
         input.insert(cell, value);
     }
 }
@@ -1098,7 +1128,11 @@ pub(super) async fn save_part(
         input.insert(format!("role-mode:{cell}"), mode.to_owned());
         role_modes.insert(cell, mode.to_owned());
     }
-    prepare_form_question_inputs(&fields, &mut input);
+    prepare_form_question_inputs(
+        &fields,
+        &mut input,
+        &data.stored["modules"][&module]["config"],
+    );
     let mut errors = HashMap::new();
     let mut changes = HashMap::new();
     for field in &fields {
@@ -1301,6 +1335,30 @@ pub(super) async fn save_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rebuilding_a_question_keeps_its_dynamic_options() {
+        let stored = serde_json::json!([{
+            "type": "string_select",
+            "label": "Pick",
+            "dynamic_options": {"items_pointer": "/items"}
+        }]);
+        let input = HashMap::from([
+            ("questions.0.type".to_owned(), "string_select".to_owned()),
+            ("questions.0.label".to_owned(), "Pick".to_owned()),
+        ]);
+        let rebuilt = form_questions_json("questions", &input, Some(&stored)).unwrap();
+        let questions: serde_json::Value = serde_json::from_str(&rebuilt).unwrap();
+        assert_eq!(
+            questions[0]["dynamic_options"],
+            serde_json::json!({"items_pointer": "/items"}),
+            "the editor does not show dynamic options, so rebuilding must keep them"
+        );
+        assert!(
+            questions[0].get("options").is_none(),
+            "an empty static option list would turn a dynamic question into a static one"
+        );
+    }
 
     fn role_list(max_items: Option<u64>) -> form::Field {
         let mut schema = serde_json::json!({

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use axum::{Form, extract::Query};
+use axum::{Form, extract::RawQuery};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -27,14 +27,31 @@ pub(super) struct TranscriptQuery {
     rating: Option<String>,
     claimed_by: Option<String>,
     close_reason: Option<String>,
+    // Repeated keys are filled from the raw query; serde's derive rejects duplicate keys.
+    #[serde(skip)]
     label: Vec<String>,
+    #[serde(skip)]
     column: Vec<String>,
     before: Option<String>,
+    #[serde(skip)]
     previous: Vec<String>,
     label_cursor: Option<String>,
     manage_labels: Option<String>,
     updated: Option<String>,
     conflict: Option<String>,
+}
+
+fn parse_raw_query(raw: &str) -> Result<TranscriptQuery, ()> {
+    let mut query = serde_urlencoded::from_str::<TranscriptQuery>(raw).map_err(|_| ())?;
+    for (key, value) in serde_urlencoded::from_str::<Vec<(String, String)>>(raw).map_err(|_| ())? {
+        match key.as_str() {
+            "label" => query.label.push(value),
+            "column" => query.column.push(value),
+            "previous" => query.previous.push(value),
+            _ => {}
+        }
+    }
+    Ok(query)
 }
 
 struct ParsedQuery {
@@ -52,7 +69,7 @@ pub(super) async fn page(
     State(app): State<App>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Query(query): Query<TranscriptQuery>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
     let l = lang(&headers, &app);
     let Some(actor) = user(&headers, &app) else {
@@ -61,7 +78,7 @@ pub(super) async fn page(
     if !session::snowflake(&id) {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     }
-    let Ok(parsed) = parse_query(query) else {
+    let Ok(parsed) = parse_raw_query(raw.as_deref().unwrap_or("")).and_then(parse_query) else {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
     };
     let asked = list_query(&parsed.filters, parsed.before.as_deref());
@@ -681,7 +698,7 @@ fn page_url(id: &str, query: &str) -> String {
 fn safe_return_query(value: Option<&str>) -> ParsedQuery {
     value
         .filter(|value| value.len() <= MAX_RETURN_QUERY_BYTES)
-        .and_then(|value| serde_urlencoded::from_str::<TranscriptQuery>(value).ok())
+        .and_then(|value| parse_raw_query(value).ok())
         .and_then(|query| parse_query(query).ok())
         .map_or_else(
             || ParsedQuery {

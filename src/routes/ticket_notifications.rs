@@ -284,6 +284,26 @@ async fn perform_action(
                 Redirect::to(&format!("/notifications?cursor={cursor}")).into_response()
             }
         }
+        // A wrong code still moved the revision on: show the form with the current one.
+        Err(error) if settings_page && action == "verify_email" => {
+            match app.api.notifications_state(None, &actor, l.tag()).await {
+                Ok((state, Some(fresh_etag))) => (
+                    error.status,
+                    Html(views::ticket_notification_settings_page(
+                        l,
+                        &headers,
+                        &state,
+                        &fresh_etag,
+                        &app.nonces.fresh(),
+                        &app.nonces.fresh(),
+                        &app.nonces.fresh(),
+                        &app.nonces.fresh(),
+                    )),
+                )
+                    .into_response(),
+                _ => api_error(&error, l, &headers),
+            }
+        }
         Err(error) => api_error(&error, l, &headers),
     }
 }

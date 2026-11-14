@@ -577,6 +577,261 @@ async fn ticket_lists_and_details_use_actor_checked_api_data() {
 }
 
 #[tokio::test]
+async fn transcript_next_link_href_reaches_the_next_page_when_followed() {
+    let (config, state) = setup().await;
+    let app = router(config.clone());
+    let detail = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/555000000000000003?state=open",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
+    let page = String::from_utf8(
+        to_bytes(detail.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let href = page
+        .split("href=\"")
+        .skip(1)
+        .filter_map(|part| part.split('"').next())
+        .find(|href| href.contains("start=4"))
+        .expect("the transcript renders a next page link");
+    // One HTML decoding pass gives the URL the browser requests.
+    let href = href.replace("&amp;", "&");
+    let next = app
+        .oneshot(request(&config, Method::GET, &href, ""))
+        .await
+        .unwrap();
+    assert_eq!(next.status(), StatusCode::OK);
+    assert!(
+        state
+            .lock()
+            .unwrap()
+            .queries
+            .iter()
+            .any(|query| query == "/v1/guilds/42/tickets/555000000000000003?start=4&limit=4"),
+        "the followed next page link requests the next transcript page"
+    );
+}
+
+#[tokio::test]
+async fn transcript_filters_accept_repeated_label_and_previous_keys() {
+    let (config, state) = setup().await;
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/transcripts?label=alpha&label=beta&previous=5&previous=3",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_ne!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "repeated scalar keys are the filter and next-page URLs the page itself generates"
+    );
+    let state = state.lock().unwrap();
+    assert!(
+        state
+            .queries
+            .iter()
+            .any(|query| query.starts_with("/v1/guilds/42/tickets?")
+                && query.contains("alpha")
+                && query.contains("beta")),
+        "both repeated label filters reach the ticket API"
+    );
+}
+
+#[tokio::test]
+async fn integration_editor_reads_and_saves_the_advanced_document() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().ticket_integrations = true;
+    let app = router(config.clone());
+    let page = app
+        .clone()
+        .oneshot(request(&config, Method::GET, "/g/42/tickets/settings", ""))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html =
+        String::from_utf8(to_bytes(page.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+    assert!(
+        html.contains(r#"name="intent" value="integrations""#),
+        "the integration editor comes from the advanced schema, which the basic view does not have"
+    );
+    let etag = html
+        .split(r#"name="etag" value=""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("the page carries the revision")
+        .replace("&quot;", "\"");
+
+    let body = format!(
+        "intent=integrations&etag=%22{}%22&integrations_present=1",
+        etag.trim_matches('"')
+    );
+    let _ = app
+        .oneshot(request(
+            &config,
+            Method::POST,
+            "/g/42/tickets/settings",
+            &body,
+        ))
+        .await
+        .unwrap();
+
+    let state = state.lock().unwrap();
+    let (_, document) = state
+        .bodies
+        .iter()
+        .find(|(path, _)| path == "/v1/guilds/42/config")
+        .expect("the integration save writes the advanced document, not the basic one");
+    let document: serde_json::Value = serde_json::from_str(document).unwrap();
+    assert!(
+        document["modules"]["tickets"]["config"]["integrations"].is_array(),
+        "integrations live at modules.tickets.config.integrations"
+    );
+    assert!(
+        document.get("integrations").is_none(),
+        "no root integrations key"
+    );
+}
+
+fn verification_form_fields(html: &str) -> Option<(String, String)> {
+    let code_at = html.find(r#"name="code""#)?;
+    let before = &html[..code_at];
+    let key_marker = r#"name="key" value=""#;
+    let key_at = before.rfind(key_marker)? + key_marker.len();
+    let key = before[key_at..].split('"').next()?.to_owned();
+    let etag_marker = r#"name="etag" value=""#;
+    let etag_at = before.rfind(etag_marker)? + etag_marker.len();
+    let etag = before[etag_at..].split('"').next()?.replace("&quot;", "\"");
+    Some((etag, key))
+}
+
+fn form_encode_etag(etag: &str) -> String {
+    etag.replace('"', "%22")
+}
+
+#[tokio::test]
+async fn wrong_verification_code_keeps_a_form_with_the_current_revision() {
+    let (config, _state) = setup().await;
+    let app = router(config.clone());
+    let page = app
+        .clone()
+        .oneshot(request(&config, Method::GET, "/settings/notifications", ""))
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html =
+        String::from_utf8(to_bytes(page.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+    let (etag, key) =
+        verification_form_fields(&html).expect("the settings page shows the verification form");
+
+    let wrong = format!(
+        "action=verify_email&etag={}&key={key}&code=000000",
+        form_encode_etag(&etag)
+    );
+    let failed = app
+        .clone()
+        .oneshot(request(
+            &config,
+            Method::POST,
+            "/settings/notifications/actions",
+            &wrong,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(failed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let html = String::from_utf8(
+        to_bytes(failed.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let (fresh, key) = verification_form_fields(&html)
+        .expect("the error page after a wrong code shows the verification form again");
+    assert_eq!(
+        fresh, "\"2\"",
+        "the error page must carry the revision the wrong attempt left behind"
+    );
+
+    let right = format!(
+        "action=verify_email&etag={}&key={key}&code=123456",
+        form_encode_etag(&fresh)
+    );
+    let saved = app
+        .oneshot(request(
+            &config,
+            Method::POST,
+            "/settings/notifications/actions",
+            &right,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        saved.status().is_redirection(),
+        "the correct code is accepted with the fresh revision, not refused with 412 (got {})",
+        saved.status()
+    );
+}
+
+#[tokio::test]
+async fn tag_edit_finds_an_entry_past_the_first_page_of_a_name_search() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().ticket_tag_count = 30;
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/tags?edit=tag-029",
+            "",
+        ))
+        .await
+        .unwrap();
+    let status = response.status();
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the edited tag is on the second page of the list"
+    );
+    assert!(html.contains("entry 29"), "the edit form shows the tag");
+}
+
+#[tokio::test]
+async fn tag_edit_stops_scanning_after_the_page_limit() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().ticket_tag_count = 25 * 21 + 1;
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::GET,
+            "/g/42/tickets/tags?edit=tag-525",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn ticket_views_reach_the_api_acl_and_keep_guild_scope() {
     let (config, state) = setup().await;
     {

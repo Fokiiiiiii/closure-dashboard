@@ -96,7 +96,37 @@ fn ticket_teams_schema(schema: &Value) -> Option<&Value> {
 }
 
 fn ticket_integrations_schema(schema: &Value) -> Option<&Value> {
-    schema_property(schema, schema, "integrations", 0)
+    let config = ticket_config_schema(schema)?;
+    schema_property(schema, config, "integrations", 0)
+}
+
+/// The advanced schema and document: integrations are not in the basic view.
+async fn advanced_document(
+    app: &App,
+    id: &str,
+    language: &str,
+) -> Result<(Value, Value, String), ApiError> {
+    let (schema, stored) = tokio::join!(app.api.schema(language), app.api.config(id));
+    let (schema, _) = schema?;
+    let (stored, etag) = stored?;
+    let etag = etag.ok_or_else(ApiError::unavailable)?;
+    Ok((schema, stored, etag))
+}
+
+fn set_ticket_integrations(document: &mut Value, integrations: Value) -> Option<()> {
+    let config = document
+        .as_object_mut()?
+        .entry("modules")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()?
+        .entry("tickets")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()?
+        .entry("config")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()?;
+    config.insert("integrations".to_owned(), integrations);
+    Some(())
 }
 
 fn ticket_config(effective: &Value) -> &Value {
@@ -470,7 +500,14 @@ async fn render(
     let remove_keys = Vec::new();
     let member_keys = Vec::new();
     let teams_schema = ticket_teams_schema(&data.schema);
-    let integrations_schema = ticket_integrations_schema(&data.schema);
+    let advanced = advanced_document(app, id, l.bot_language()).await.ok();
+    let no_document = Value::Null;
+    let advanced_stored = advanced
+        .as_ref()
+        .map_or(&no_document, |(_, stored, _)| stored);
+    let integrations_schema = advanced
+        .as_ref()
+        .and_then(|(schema, _, _)| ticket_integrations_schema(schema));
     let (integration_secret_state, integration_secrets_available, can_manage_secrets) =
         if integrations_schema.is_some() {
             match app.api.ticket_integration_secrets(id, actor).await {
@@ -487,7 +524,7 @@ async fn render(
         };
     let mut integration_action_keys = HashMap::new();
     if can_manage_secrets {
-        for integration in data.effective["integrations"]
+        for integration in ticket_config(&data.effective)["integrations"]
             .as_array()
             .into_iter()
             .flatten()
@@ -528,7 +565,7 @@ async fn render(
         id,
         guild: guild_name(&data.guilds, id),
         effective: &data.effective,
-        stored: &data.stored,
+        stored: advanced_stored,
         directory: data.directory.as_ref(),
         integrations_schema,
         integration_secret_state: &integration_secret_state,
@@ -973,9 +1010,21 @@ async fn save_integrations(
     let Some(form) = parse_integration_form(pairs) else {
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
     };
-    let data = match modules::load(app, id, l.bot_language()).await {
+    let basic = match modules::load(app, id, l.bot_language()).await {
         Ok(data) => data,
         Err(error) => return api_error(&error, l, headers),
+    };
+    let (schema_document, stored, etag) = match advanced_document(app, id, l.bot_language()).await {
+        Ok(document) => document,
+        Err(error) => return api_error(&error, l, headers),
+    };
+    let data = modules::Data {
+        schema: schema_document,
+        stored,
+        etag,
+        effective: basic.effective,
+        directory: basic.directory,
+        guilds: basic.guilds,
     };
     let Some(schema) = ticket_integrations_schema(&data.schema) else {
         return error_page(StatusCode::NOT_FOUND, l, keys::NOTFOUND, headers);
@@ -1021,8 +1070,8 @@ async fn save_integrations(
         .await;
     }
     let mut ids = HashSet::new();
-    let stored_integrations = data.stored["integrations"].as_array();
-    let effective_integrations = data.effective["integrations"].as_array();
+    let stored_integrations = ticket_config(&data.stored)["integrations"].as_array();
+    let effective_integrations = ticket_config(&data.effective)["integrations"].as_array();
     for integration in &mut integrations {
         let Some(integration_id) = integration["id"].as_str().map(str::to_owned) else {
             return integration_form_error(
@@ -1077,15 +1126,10 @@ async fn save_integrations(
             && integration_may_have_secrets(old)
     });
     let mut candidate = data.stored.clone();
-    let Some(object) = candidate.as_object_mut() else {
+    if set_ticket_integrations(&mut candidate, Value::Array(integrations)).is_none() {
         return error_page(StatusCode::BAD_GATEWAY, l, keys::INVALID, headers);
-    };
-    object.insert("integrations".into(), Value::Array(integrations));
-    match app
-        .api
-        .put_basic_config(id, candidate, &data.etag, actor)
-        .await
-    {
+    }
+    match app.api.put_config(id, candidate, &data.etag, actor).await {
         Ok(_) => Redirect::to(&format!("/g/{id}/tickets/settings?saved=1")).into_response(),
         Err(error) if error.status == StatusCode::PRECONDITION_FAILED => {
             conflict(app, headers, id, actor, "guild", "guild").await
@@ -1218,7 +1262,7 @@ async fn integration_secret_action(
         Ok(data) => data,
         Err(error) => return api_error(&error, l, headers),
     };
-    let Some(integration) = data.effective["integrations"]
+    let Some(integration) = ticket_config(&data.effective)["integrations"]
         .as_array()
         .into_iter()
         .flatten()

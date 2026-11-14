@@ -46,6 +46,53 @@ async fn language_negotiation_and_removed_routes() {
     assert!(!body.contains("name=\"theme\""));
 }
 
+/// Ticket tags 0..26 mention the tag `tag-029` in their body, so a name search for it matches only them.
+fn ticket_tag_body(index: usize) -> String {
+    if index < 26 {
+        "decoy tag-029".to_owned()
+    } else {
+        format!("entry {index}")
+    }
+}
+
+fn ticket_tag_state(count: usize, query: &str) -> serde_json::Value {
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+            .map(str::to_owned)
+    };
+    let needle = param("q");
+    let start = param("cursor")
+        .and_then(|cursor| cursor.strip_prefix("tag-")?.parse::<usize>().ok())
+        .unwrap_or(0);
+    let matching: Vec<usize> = (0..count)
+        .filter(|index| {
+            needle
+                .as_deref()
+                .is_none_or(|needle| ticket_tag_body(*index).contains(needle))
+        })
+        .collect();
+    let tags: Vec<serde_json::Value> = matching
+        .iter()
+        .skip(start)
+        .take(25)
+        .map(|index| {
+            json!({"id": format!("tag-{index:03}"), "type": "Text", "body": ticket_tag_body(*index), "embed": null, "article_id": null, "article_title": null, "revision": 1})
+        })
+        .collect();
+    let next = (start + 25 < matching.len()).then(|| format!("tag-{:03}", start + 25));
+    json!({"state": {"tags": tags, "next_cursor": next, "articles": [], "articles_next_cursor": null}})
+}
+
+fn notification_revision_etag(revision: u32) -> &'static str {
+    match revision {
+        0 => "\"1\"",
+        1 => "\"2\"",
+        _ => "\"3\"",
+    }
+}
+
 #[derive(Default)]
 struct Fake {
     calls: Vec<(String, String, String, String)>,
@@ -58,6 +105,9 @@ struct Fake {
     always_conflict: bool,
     put_forbidden: bool,
     invalid_schema: bool,
+    ticket_integrations: bool,
+    notification_revision: u32,
+    ticket_tag_count: usize,
     stats_status: Option<StatusCode>,
     assigned: bool,
     queries: Vec<String>,
@@ -124,7 +174,42 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
             "{}".to_owned(),
         );
     }
-    fake.calls.push((path.clone(), auth, etag, actor));
+    fake.calls.push((path.clone(), auth, etag.clone(), actor));
+    if path == "/v1/notifications" && method == Method::GET {
+        return (
+            StatusCode::OK,
+            [(header::ETAG, notification_revision_etag(fake.notification_revision))],
+            json!({"unread_count":0,"notifications":[],"next_cursor":null,"preferences":{"in_app":true,"discord_dm":false,"email":false},"email":{"available":true,"verified":false,"pending":true,"address_masked":"","pending_address_masked":"a***@example.test"}}).to_string(),
+        );
+    }
+    if path == "/v1/notifications/actions" && method == Method::POST {
+        let revision = fake.notification_revision;
+        if etag != notification_revision_etag(revision) {
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                [(header::ETAG, notification_revision_etag(revision))],
+                "{}".to_owned(),
+            );
+        }
+        let action: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        if action["data"]["code"] == "123456" {
+            return (
+                StatusCode::OK,
+                [(header::ETAG, notification_revision_etag(revision))],
+                "{}".to_owned(),
+            );
+        }
+        // A wrong code counts as an attempt, which moves the revision on.
+        fake.notification_revision += 1;
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            [(
+                header::ETAG,
+                notification_revision_etag(fake.notification_revision),
+            )],
+            json!({"error":{"message":"Invalid"}}).to_string(),
+        );
+    }
     if let Some(status) = fake.status {
         return (status, [(header::ETAG, "\"1\"")], json!({"error":{"code":"secret-token", "message":"secret-token", "issues":[{"path":"x", "code":"x", "message":"secret-token"}]}}).to_string());
     }
@@ -153,11 +238,15 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     } else if path == "/v1/schema" {
         if fake.invalid_schema {
             json!({"properties":{"modules":{"properties":{"bad!":{"title":"bad"}}}}})
+        } else if fake.ticket_integrations && !query.contains("view=basic") {
+            json!({"properties":{"modules":{"properties":{"tickets":{"properties":{"config":{"properties":{"integrations":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","title":"id"}}}}}}}}}}}})
         } else {
             json!({"properties":{"modules":{"anyOf":[{"properties":{"mod":{"title":"<Mod>"}}}]}}})
         }
     } else if path.ends_with("/config") && method == Method::PUT {
         fake.puts += 1;
+        fake.bodies
+            .push((path.clone(), String::from_utf8_lossy(&body).into_owned()));
         if fake.put_forbidden {
             return (
                 StatusCode::FORBIDDEN,
@@ -193,6 +282,8 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         }
     } else if path.ends_with("/directory") {
         json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path == "/v1/guilds/42/ticket-actions/tags/tags" && fake.ticket_tag_count > 0 {
+        ticket_tag_state(fake.ticket_tag_count, &query)
     } else if path.contains("/ticket-actions/") {
         json!({"state":{"can_manage_secrets": !fake.secret_outsider}})
     } else if path.contains("/tickets") && fake.ticket_forbidden {

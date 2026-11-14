@@ -701,10 +701,9 @@ fn integration_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
         kind: Kind::List(columns.clone()),
         schema: schema.clone(),
     };
-    let current = &page.effective["integrations"];
-    let stored = page.stored["integrations"]
-        .as_array()
-        .map(|_| &page.stored["integrations"]);
+    let current = &page.effective["modules"]["tickets"]["config"]["integrations"];
+    let stored_integrations = &page.stored["modules"]["tickets"]["config"]["integrations"];
+    let stored = stored_integrations.as_array().map(|_| stored_integrations);
     let rows = super::form::config_list_editor(
         l,
         &field,

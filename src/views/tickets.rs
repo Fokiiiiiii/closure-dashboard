@@ -568,7 +568,7 @@ fn render_message_embeds(body: &mut String, message: &Value) {
             if let Some(url) = embed[key].as_str().filter(|url| transcript_https_url(url)) {
                 let _ = write!(
                     body,
-                    r#"<a class="ticket-embed-image" href="{}" target="_blank" rel="noopener noreferrer"><img src="{}" alt="" loading="lazy"></a>"#,
+                    r#"<a class="ticket-embed-image" href="{}" target="_blank" rel="noopener noreferrer"><img src="{}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>"#,
                     escape(url),
                     escape(url)
                 );
@@ -665,12 +665,7 @@ fn transcript_page_url(
         ("return_to", return_to),
     ])
     .unwrap_or_default();
-    format!(
-        "/g/{}/tickets/{}?{}",
-        escape(id),
-        escape(channel_id),
-        escape(&query)
-    )
+    format!("/g/{id}/tickets/{channel_id}?{query}")
 }
 
 struct TicketPageContext<'a> {
@@ -899,4 +894,24 @@ fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPa
         );
     }
     body.push_str("</div></section>");
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::render_transcript_message;
+
+    #[test]
+    fn embed_images_do_not_send_the_referrer() {
+        let message = json!({"embeds": [{"image_url": "https://images.example.test/a.png"}]});
+        let mut body = String::new();
+        render_transcript_message(&mut body, &message, "", false);
+        assert!(
+            body.contains(
+                r#"<img src="https://images.example.test/a.png" alt="" loading="lazy" referrerpolicy="no-referrer">"#
+            ),
+            "embed images are fetched without the Referer header: {body}"
+        );
+    }
 }

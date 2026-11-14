@@ -69,12 +69,17 @@ pub(super) async fn list(
             Ok(None)
         }
     };
-    let (tags, articles, guilds) = tokio::join!(
-        app.api
-            .ticket_tags_state(&id, state_query, state_cursor, &actor),
-        article_request,
-        app.api.guilds()
-    );
+    let tags_request = async {
+        match edit_id {
+            Some(edit_id) => find_tag_page(&app, &id, edit_id, &actor).await,
+            None => {
+                app.api
+                    .ticket_tags_state(&id, state_query, state_cursor, &actor)
+                    .await
+            }
+        }
+    };
+    let (tags, articles, guilds) = tokio::join!(tags_request, article_request, app.api.guilds());
     let data = match tags {
         Ok((data, _)) => data,
         Err(error) => return api_error(&error, l, &headers),
@@ -304,6 +309,33 @@ fn preview(
         return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, headers);
     };
     Html(views::tags_preview(l, body, embed.as_ref())).into_response()
+}
+
+/// The API searches tags by name only, so an edit target is found by paging through the list.
+const TAG_PAGE_SCAN_LIMIT: usize = 20;
+
+async fn find_tag_page(
+    app: &App,
+    id: &str,
+    tag_id: &str,
+    actor: &str,
+) -> Result<(Value, Option<String>), ApiError> {
+    let mut page = app.api.ticket_tags_state(id, None, None, actor).await?;
+    for _ in 1..TAG_PAGE_SCAN_LIMIT {
+        let found = page.0["state"]["tags"]
+            .as_array()
+            .is_some_and(|tags| tags.iter().any(|tag| tag["id"].as_str() == Some(tag_id)));
+        match page.0["state"]["next_cursor"].as_str().map(str::to_owned) {
+            Some(next) if !found => {
+                page = app
+                    .api
+                    .ticket_tags_state(id, None, Some(&next), actor)
+                    .await?;
+            }
+            _ => break,
+        }
+    }
+    Ok(page)
 }
 
 fn valid_tag_state(state: &Value) -> bool {
