@@ -308,6 +308,48 @@ fn transcript_https_url(value: &str) -> bool {
     value.starts_with("https://") && !value.contains('\\') && !value.chars().any(char::is_control)
 }
 
+// Only Discord's CDN loads by default: its requests reveal nothing beyond Discord itself.
+const DISCORD_IMAGE_HOSTS: [&str; 2] = ["cdn.discordapp.com", "media.discordapp.net"];
+
+fn discord_image_url(value: &str) -> bool {
+    value.strip_prefix("https://").is_some_and(|rest| {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        DISCORD_IMAGE_HOSTS
+            .iter()
+            .any(|host| authority.eq_ignore_ascii_case(host))
+    })
+}
+
+pub(crate) fn transcript_img_src(show_images: bool) -> String {
+    if show_images {
+        return "https:".to_owned();
+    }
+    let hosts = DISCORD_IMAGE_HOSTS.map(|host| format!("https://{host}"));
+    format!("'self' {}", hosts.join(" "))
+}
+
+#[derive(Clone, Copy)]
+struct TranscriptImages<'a> {
+    show: bool,
+    show_url: &'a str,
+    show_label: &'a str,
+}
+
+impl TranscriptImages<'_> {
+    fn allows(self, url: &str) -> bool {
+        self.show || discord_image_url(url)
+    }
+}
+
+fn render_hidden_image(body: &mut String, images: TranscriptImages<'_>) {
+    let _ = write!(
+        body,
+        r#"<a class="button secondary ticket-image-show" href="{}">{}</a>"#,
+        escape(images.show_url),
+        escape(images.show_label)
+    );
+}
+
 fn transcript_message_text(line: &str) -> &str {
     line.split_once(": ")
         .map_or(line, |(_, content)| content)
@@ -336,7 +378,12 @@ fn transcript_plain_segment(body: &mut String, text: &str) {
     }
 }
 
-fn render_transcript_page(body: &mut String, page: &Value, seen_messages: &mut HashSet<String>) {
+fn render_transcript_page(
+    body: &mut String,
+    page: &Value,
+    seen_messages: &mut HashSet<String>,
+    images: TranscriptImages<'_>,
+) {
     let text = page["text"].as_str().unwrap_or("");
     let Some(messages) = page["messages"]
         .as_array()
@@ -385,13 +432,19 @@ fn render_transcript_page(body: &mut String, page: &Value, seen_messages: &mut H
         if let Some(id) = message_id {
             seen_messages.insert(id);
         }
-        render_transcript_message(body, message, &line, continuation);
+        render_transcript_message(body, message, &line, continuation, images);
         cursor = end;
     }
     transcript_plain_segment(body, &chars[cursor..].iter().collect::<String>());
 }
 
-fn render_transcript_message(body: &mut String, message: &Value, line: &str, continuation: bool) {
+fn render_transcript_message(
+    body: &mut String,
+    message: &Value,
+    line: &str,
+    continuation: bool,
+    images: TranscriptImages<'_>,
+) {
     let content = escape(transcript_message_text(line));
     let author = message["author_name"]
         .as_str()
@@ -431,8 +484,8 @@ fn render_transcript_message(body: &mut String, message: &Value, line: &str, con
         r#"<div class="ticket-message-content">{content}</div>"#
     );
     render_message_mentions(body, message);
-    render_message_attachments(body, message);
-    render_message_embeds(body, message);
+    render_message_attachments(body, message, images);
+    render_message_embeds(body, message, images);
     render_message_components(body, message);
     body.push_str("</article>");
 }
@@ -464,7 +517,7 @@ fn render_message_mentions(body: &mut String, message: &Value) {
     body.push_str("</div>");
 }
 
-fn render_message_attachments(body: &mut String, message: &Value) {
+fn render_message_attachments(body: &mut String, message: &Value, images: TranscriptImages<'_>) {
     let Some(attachments) = message["attachments"]
         .as_array()
         .filter(|items| !items.is_empty())
@@ -481,7 +534,9 @@ fn render_message_attachments(body: &mut String, message: &Value) {
         };
         let filename = attachment["filename"].as_str().unwrap_or(url);
         let content_type = attachment["content_type"].as_str().unwrap_or("");
-        if content_type.starts_with("image/") {
+        if content_type.starts_with("image/") && !images.allows(url) {
+            render_hidden_image(body, images);
+        } else if content_type.starts_with("image/") {
             let _ = write!(
                 body,
                 r#"<a class="ticket-attachment-image" href="{}" target="_blank" rel="noopener noreferrer"><img src="{}" alt="{}" loading="lazy"></a>"#,
@@ -501,7 +556,7 @@ fn render_message_attachments(body: &mut String, message: &Value) {
     body.push_str("</div>");
 }
 
-fn render_message_embeds(body: &mut String, message: &Value) {
+fn render_message_embeds(body: &mut String, message: &Value, images: TranscriptImages<'_>) {
     let Some(embeds) = message["embeds"]
         .as_array()
         .filter(|items| !items.is_empty())
@@ -566,6 +621,10 @@ fn render_message_embeds(body: &mut String, message: &Value) {
         }
         for key in ["image_url", "thumbnail_url"] {
             if let Some(url) = embed[key].as_str().filter(|url| transcript_https_url(url)) {
+                if !images.allows(url) {
+                    render_hidden_image(body, images);
+                    continue;
+                }
                 let _ = write!(
                     body,
                     r#"<a class="ticket-embed-image" href="{}" target="_blank" rel="noopener noreferrer"><img src="{}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>"#,
@@ -657,14 +716,18 @@ fn transcript_page_url(
     state: &str,
     start: u32,
     return_to: &str,
+    show_images: bool,
 ) -> String {
     let start = start.to_string();
-    let query = serde_urlencoded::to_string([
+    let mut params = vec![
         ("state", state),
         ("start", start.as_str()),
         ("return_to", return_to),
-    ])
-    .unwrap_or_default();
+    ];
+    if show_images {
+        params.push(("show_images", "1"));
+    }
+    let query = serde_urlencoded::to_string(params).unwrap_or_default();
     format!("/g/{id}/tickets/{channel_id}?{query}")
 }
 
@@ -681,6 +744,7 @@ struct TicketPageContext<'a> {
     action_tokens: Option<&'a super::ActionTokens>,
     action_updated: bool,
     ticket_settings: bool,
+    show_images: bool,
 }
 
 // Keep the route-facing adapter stable; page rendering uses the context below.
@@ -701,6 +765,7 @@ pub(crate) fn ticket(
     action_tokens: Option<&super::ActionTokens>,
     action_updated: bool,
     ticket_settings: bool,
+    show_images: bool,
 ) -> String {
     let context = TicketPageContext {
         id,
@@ -715,6 +780,7 @@ pub(crate) fn ticket(
         action_tokens,
         action_updated,
         ticket_settings,
+        show_images,
     };
     let mut body = String::new();
     render_ticket_header(&mut body, l, &context);
@@ -845,9 +911,23 @@ fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPa
                 transcript.get("text").and_then(Value::as_str).unwrap_or(""),
             );
         } else {
+            let show_url = transcript_page_url(
+                context.id,
+                context.channel_id,
+                context.state,
+                context.start,
+                context.back_url,
+                true,
+            );
+            let show_label = l.text(keys::TICKET_TRANSCRIPT_SHOW_IMAGES);
+            let images = TranscriptImages {
+                show: context.show_images,
+                show_url: &show_url,
+                show_label: &show_label,
+            };
             let mut seen_messages = HashSet::new();
             for page in pages {
-                render_transcript_page(body, page, &mut seen_messages);
+                render_transcript_page(body, page, &mut seen_messages, images);
             }
         }
     } else {
@@ -865,6 +945,7 @@ fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPa
             context.state,
             previous,
             context.back_url,
+            context.show_images,
         );
         let _ = write!(
             body,
@@ -885,6 +966,7 @@ fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPa
             context.state,
             next,
             context.back_url,
+            context.show_images,
         );
         let _ = write!(
             body,
@@ -900,18 +982,134 @@ fn render_ticket_transcript(body: &mut String, l: Locale<'_>, context: &TicketPa
 mod tests {
     use serde_json::json;
 
-    use super::render_transcript_message;
+    use super::{TranscriptImages, render_transcript_message, transcript_img_src};
+
+    const SHOW_URL: &str = "/g/1/tickets/2?state=open&start=0&show_images=1";
+
+    fn render(message: &serde_json::Value, show: bool) -> String {
+        let images = TranscriptImages {
+            show,
+            show_url: SHOW_URL,
+            show_label: "Show image",
+        };
+        let mut body = String::new();
+        render_transcript_message(&mut body, message, "", false, images);
+        body
+    }
+
+    #[test]
+    fn external_embed_images_are_not_loaded_by_default() {
+        let message = json!({"embeds": [{
+            "image_url": "https://evil.example/a.png",
+            "thumbnail_url": "https://cdn.discordapp.com/attachments/1/2/t.png"
+        }]});
+        let body = render(&message, false);
+        assert!(
+            !body.contains(r#"<img src="https://evil.example/a.png""#),
+            "external image was requested without an explicit action: {body}"
+        );
+        assert!(
+            body.contains(r#"<img src="https://cdn.discordapp.com/attachments/1/2/t.png""#),
+            "Discord CDN image should render by default: {body}"
+        );
+        assert!(
+            body.contains("ticket-image-show"),
+            "missing show link: {body}"
+        );
+    }
+
+    #[test]
+    fn external_attachment_images_are_not_loaded_by_default() {
+        let message = json!({"attachments": [{
+            "url": "https://evil.example/x.png",
+            "filename": "x.png",
+            "content_type": "image/png"
+        }]});
+        let body = render(&message, false);
+        assert!(
+            !body.contains("<img"),
+            "attachment image loaded by default: {body}"
+        );
+        assert!(
+            body.contains("ticket-image-show"),
+            "missing show link: {body}"
+        );
+    }
+
+    #[test]
+    fn spoofed_discord_hosts_are_not_loaded_by_default() {
+        for url in [
+            "https://cdn.discordapp.com.evil.example/a.png",
+            "https://cdn.discordapp.com@evil.example/a.png",
+            "https://media.discordapp.net.evil.example/a.png",
+            "https://discordapp.com.evil.example/a.png",
+            "https://evil.example/cdn.discordapp.com/a.png",
+            "https://evil.example?https://cdn.discordapp.com/a.png",
+        ] {
+            let message = json!({"embeds": [{"image_url": url}]});
+            let body = render(&message, false);
+            assert!(
+                !body.contains("<img"),
+                "spoofed host {url} loaded by default: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_show_images_loads_external_images() {
+        let message = json!({"embeds": [{"image_url": "https://evil.example/a.png"}]});
+        let body = render(&message, true);
+        assert!(
+            body.contains(r#"<img src="https://evil.example/a.png""#),
+            "explicitly requested image was not rendered: {body}"
+        );
+        assert!(
+            !body.contains("ticket-image-show"),
+            "show link left after showing: {body}"
+        );
+    }
+
+    #[test]
+    fn show_link_is_escaped_exactly_once() {
+        let message = json!({"embeds": [{"image_url": "https://evil.example/a.png"}]});
+        let body = render(&message, false);
+        assert!(
+            body.contains(r#"href="/g/1/tickets/2?state=open&amp;start=0&amp;show_images=1""#),
+            "show link not escaped once: {body}"
+        );
+        assert!(
+            !body.contains("&amp;amp;"),
+            "show link double escaped: {body}"
+        );
+    }
 
     #[test]
     fn embed_images_do_not_send_the_referrer() {
-        let message = json!({"embeds": [{"image_url": "https://images.example.test/a.png"}]});
-        let mut body = String::new();
-        render_transcript_message(&mut body, &message, "", false);
+        let message = json!({"embeds": [{"image_url": "https://cdn.discordapp.com/a.png"}]});
+        let body = render(&message, false);
         assert!(
             body.contains(
-                r#"<img src="https://images.example.test/a.png" alt="" loading="lazy" referrerpolicy="no-referrer">"#
+                r#"<img src="https://cdn.discordapp.com/a.png" alt="" loading="lazy" referrerpolicy="no-referrer">"#
             ),
             "embed images are fetched without the Referer header: {body}"
+        );
+    }
+
+    #[test]
+    fn transcript_csp_only_changes_img_src() {
+        let policy = |img_src: &str| {
+            crate::routes::content_security_policy(img_src)
+                .to_str()
+                .unwrap_or_default()
+                .to_owned()
+        };
+        assert_eq!(
+            policy(&transcript_img_src(false)),
+            "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com https://media.discordapp.net; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        );
+        assert_eq!(
+            policy(&transcript_img_src(true)),
+            "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src https:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         );
     }
 }

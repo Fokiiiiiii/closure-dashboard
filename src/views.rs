@@ -229,7 +229,9 @@ pub(crate) use ticket_notifications::{
     ticket_notification_settings_page, ticket_notifications_page,
 };
 pub(crate) use ticket_settings::{TicketSettingsPage, ticket_blacklist_page, ticket_settings_page};
-pub(crate) use tickets::{ticket as ticket_page, ticket_bulk_results, tickets as tickets_page};
+pub(crate) use tickets::{
+    ticket as ticket_page, ticket_bulk_results, tickets as tickets_page, transcript_img_src,
+};
 pub(crate) use transcripts::{
     TRANSCRIPT_COLUMNS, TranscriptActionTokens, TranscriptFilters, TranscriptLabelTokens,
     TranscriptPageData, transcripts_page,

@@ -494,6 +494,87 @@ impl Api {
     }
 
     /// # Errors
+    /// Returns an error if the query or cursor is invalid or the API request fails.
+    pub async fn gallery_source_state(
+        &self,
+        guild: &str,
+        query: Option<&str>,
+        cursor: Option<&str>,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        let query = query.map(str::trim).filter(|query| !query.is_empty());
+        if query
+            .is_some_and(|query| query.chars().count() > 100 || query.chars().any(char::is_control))
+            || cursor.is_some_and(|cursor| {
+                cursor.is_empty() || cursor.len() > 200 || cursor.chars().any(char::is_control)
+            })
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid gallery source query".into(),
+                Vec::new(),
+            ));
+        }
+        let mut parameters = Vec::new();
+        if let Some(query) = query {
+            parameters.push(("q", query.to_owned()));
+        }
+        if let Some(cursor) = cursor {
+            parameters.push(("cursor", cursor.to_owned()));
+        }
+        let query = serde_urlencoded::to_string(parameters).map_err(|_| ApiError::unavailable())?;
+        let path = if query.is_empty() {
+            format!("/v1/guilds/{guild}/ticket-actions/gallery/gallery")
+        } else {
+            format!("/v1/guilds/{guild}/ticket-actions/gallery/gallery?{query}")
+        };
+        self.request(Method::GET, &path, None, None, Some(actor))
+            .await
+    }
+
+    /// # Errors
+    /// Returns a sanitized API or transport error. Secret values are never returned.
+    pub async fn list_orphan_secrets(
+        &self,
+        guild: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        self.request(
+            Method::GET,
+            &format!("/v1/guilds/{guild}/integration-secrets/orphans"),
+            None,
+            None,
+            Some(actor),
+        )
+        .await
+    }
+
+    /// # Errors
+    /// Returns a sanitized API or transport error.
+    pub async fn delete_orphan_secret(
+        &self,
+        guild: &str,
+        integration_id: &str,
+        generation: &str,
+        secret_name: &str,
+        actor: &str,
+    ) -> Result<(Value, Option<String>), ApiError> {
+        let body = serde_json::json!({
+            "integration_id": integration_id,
+            "generation": generation,
+            "secret_name": secret_name,
+        });
+        self.request(
+            Method::POST,
+            &format!("/v1/guilds/{guild}/integration-secrets/orphans/delete"),
+            Some(body),
+            None,
+            Some(actor),
+        )
+        .await
+    }
+
+    /// # Errors
     /// Returns a sanitized API or transport error.
     pub async fn ticket_action_panels(
         &self,

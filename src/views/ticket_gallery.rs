@@ -516,6 +516,8 @@ pub(crate) fn ticket_gallery_publish(
     submission: Option<&Value>,
     key: &str,
     saved: bool,
+    search: &str,
+    next_cursor: Option<&str>,
 ) -> String {
     let base = gallery_path(id);
     let editing = submission.is_some();
@@ -538,6 +540,49 @@ pub(crate) fn ticket_gallery_publish(
     }
     let rows = sources["sources"].as_array().cloned().unwrap_or_default();
     let selected = format!("{kind}:{source_id}");
+    let fields = picker_fields(kind, source_id, submission);
+    let _ = write!(
+        body,
+        r#"<section class="card panel"><form method="get" action="{base}/publish" class="gallery-source-search"><label class="field"><span>{}</span><input type="search" name="q" maxlength="100" value="{}"></label><button class="button secondary" type="submit">{}</button>"#,
+        l.text(keys::TICKET_GALLERY_SOURCE_SEARCH),
+        escape(search),
+        l.text(keys::TICKET_GALLERY_SOURCE_SEARCH_SUBMIT)
+    );
+    for (name, value) in &fields {
+        let _ = write!(
+            body,
+            r#"<input type="hidden" name="{name}" value="{}">"#,
+            escape(value)
+        );
+    }
+    body.push_str("</form>");
+    if let Some(next) = next_cursor {
+        let _ = write!(
+            body,
+            r#"<p class="settings-help gallery-source-note">{}</p>"#,
+            l.number(
+                keys::TICKET_GALLERY_SOURCE_NOTE,
+                u64::try_from(rows.len()).unwrap_or(u64::MAX)
+            )
+        );
+        let mut params = fields.clone();
+        if !search.is_empty() {
+            params.push(("q", search.to_owned()));
+        }
+        params.push(("cursor", next.to_owned()));
+        let pairs: Vec<(&str, &str)> = params
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        let _ = write!(
+            body,
+            r#"<a class="button secondary gallery-source-more" href="{}/publish?{}">{}</a>"#,
+            base,
+            escape(&query_string(&pairs)),
+            l.text(keys::TICKET_GALLERY_SOURCE_MORE)
+        );
+    }
+    body.push_str("</section>");
     let _ = write!(
         body,
         r#"<section class="card panel"><form method="post" action="{base}/publish">"#
@@ -675,6 +720,25 @@ pub(crate) fn ticket_gallery_publish(
         &body,
         false,
     )
+}
+
+/// The picker state a search or "more" link keeps, so the publish form it returns to is the same one.
+fn picker_fields(
+    kind: &str,
+    source_id: &str,
+    submission: Option<&Value>,
+) -> Vec<(&'static str, String)> {
+    let mut fields = vec![("kind", kind.to_owned())];
+    if !source_id.is_empty() {
+        fields.push(("source_id", source_id.to_owned()));
+    }
+    if let Some(submission) = submission {
+        fields.push((
+            "submission_id",
+            submission["id"].as_i64().unwrap_or_default().to_string(),
+        ));
+    }
+    fields
 }
 
 fn status_key(status: &str) -> &'static str {

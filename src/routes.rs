@@ -237,6 +237,10 @@ pub fn router(config: Config) -> Router {
             post(ticket_settings::integration_secret_action_route),
         )
         .route(
+            "/g/{id}/tickets/settings/integrations/orphans/delete",
+            post(ticket_settings::integration_orphan_delete_route),
+        )
+        .route(
             "/g/{id}/tickets/settings/knowledge",
             get(ticket_knowledge::list),
         )
@@ -622,8 +626,15 @@ async fn guard(State(app): State<App>, request: Request, next: Next) -> Response
         header::REFERRER_POLICY,
         HeaderValue::from_static("same-origin"),
     );
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src https: data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"));
+    h.entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert_with(|| content_security_policy("https: data:"));
     response
+}
+pub(crate) fn content_security_policy(img_src: &str) -> HeaderValue {
+    HeaderValue::from_str(&format!(
+        "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src {img_src}; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+    ))
+    .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"))
 }
 async fn run(next: Next, request: Request) -> Response {
     tokio::time::timeout(Duration::from_secs(15), next.run(request))

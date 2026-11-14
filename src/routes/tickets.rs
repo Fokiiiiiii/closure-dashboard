@@ -1,6 +1,7 @@
 use super::{
     App, HashMap, HeaderMap, Html, IntoResponse, Path, Query, Redirect, Response, State,
-    StatusCode, api_error, error_page, guild_name, keys, lang, user, views,
+    StatusCode, api_error, content_security_policy, error_page, guild_name, header, keys, lang,
+    user, views,
 };
 use crate::session;
 
@@ -180,7 +181,8 @@ pub(super) async fn one(
                 .as_array()
                 .is_some_and(|panels| !panels.is_empty())
     });
-    Html(views::ticket_page(
+    let show_images = query.get("show_images").is_some_and(|value| value == "1");
+    let mut response = Html(views::ticket_page(
         l,
         &headers,
         &id,
@@ -196,6 +198,12 @@ pub(super) async fn one(
         action_tokens.as_ref(),
         query.get("updated").is_some_and(|value| value == "1"),
         ticket_settings,
+        show_images,
     ))
-    .into_response()
+    .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        content_security_policy(&views::transcript_img_src(show_images)),
+    );
+    response
 }

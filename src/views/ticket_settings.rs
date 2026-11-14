@@ -36,6 +36,8 @@ pub(crate) struct TicketSettingsPage<'a> {
     pub integration_action_keys: &'a HashMap<String, String>,
     pub integration_secrets_available: bool,
     pub can_manage_secrets: bool,
+    /// `None` hides the unused-secret list (the viewer may not see it).
+    pub integration_orphans: Option<&'a [Value]>,
     pub integration_secret_error: Option<&'a str>,
     pub secret_saved: bool,
     pub etag: &'a str,
@@ -865,7 +867,40 @@ fn integration_editor(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
         }
         body.push_str("</ul></section>");
     }
+    body.push_str(&integration_orphans_section(l, page));
     body.push_str("</section>");
+    body
+}
+
+fn integration_orphans_section(l: Locale<'_>, page: &TicketSettingsPage<'_>) -> String {
+    let Some(orphans) = page.integration_orphans else {
+        return String::new();
+    };
+    let mut body = format!(
+        "<h3>{}</h3><p class=\"settings-help\">{}</p>",
+        l.text(keys::TICKET_INTEGRATION_ORPHANS_TITLE),
+        l.text(keys::TICKET_INTEGRATION_ORPHANS_HELP)
+    );
+    if orphans.is_empty() {
+        let _ = write!(
+            body,
+            "<p class=\"settings-help\">{}</p>",
+            l.text(keys::TICKET_INTEGRATION_ORPHANS_EMPTY)
+        );
+    }
+    for orphan in orphans {
+        let _ = write!(
+            body,
+            "<form method=\"post\" action=\"/g/{}/tickets/settings/integrations/orphans/delete\"><p><code>{}</code> / <code>{}</code></p><input type=\"hidden\" name=\"integration_id\" value=\"{}\"><input type=\"hidden\" name=\"generation\" value=\"{}\"><input type=\"hidden\" name=\"secret_name\" value=\"{}\"><button class=\"button secondary\" type=\"submit\">{}</button></form>",
+            escape(page.id),
+            escape(orphan["integration_id"].as_str().unwrap_or_default()),
+            escape(orphan["secret_name"].as_str().unwrap_or_default()),
+            escape(orphan["integration_id"].as_str().unwrap_or_default()),
+            escape(orphan["generation"].as_str().unwrap_or_default()),
+            escape(orphan["secret_name"].as_str().unwrap_or_default()),
+            l.text(keys::TICKET_INTEGRATION_ORPHAN_DELETE)
+        );
+    }
     body
 }
 

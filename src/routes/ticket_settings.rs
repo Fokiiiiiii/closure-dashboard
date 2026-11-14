@@ -209,6 +209,16 @@ fn integration_may_have_secrets(integration: &Value) -> bool {
             .is_some_and(|secrets| !secrets.is_empty())
 }
 
+fn valid_orphan(value: &Value) -> bool {
+    value["integration_id"]
+        .as_str()
+        .is_some_and(integration_id_valid)
+        && value["generation"].as_str().is_some_and(generation_valid)
+        && value["secret_name"]
+            .as_str()
+            .is_some_and(integration_secret_name_valid)
+}
+
 fn integration_secret_error(error: &ApiError, l: crate::i18n::Locale<'_>) -> String {
     match error.status {
         StatusCode::FORBIDDEN => l.text(keys::TICKET_INTEGRATION_SECRETS_OWNER_ONLY),
@@ -554,6 +564,17 @@ async fn render(
             }
         }
     }
+    let integration_orphans = if can_manage_secrets && integrations_schema.is_some() {
+        match app.api.list_orphan_secrets(id, actor).await {
+            Ok((response, _)) => response["orphans"]
+                .as_array()
+                .filter(|rows| rows.iter().all(valid_orphan))
+                .cloned(),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
     let team_count = ticket_config(&data.effective)["staff_teams"]
         .as_array()
         .map_or(0, Vec::len);
@@ -572,6 +593,7 @@ async fn render(
         integration_action_keys: &integration_action_keys,
         integration_secrets_available,
         can_manage_secrets,
+        integration_orphans: integration_orphans.as_deref(),
         integration_secret_error: secret_error.as_deref(),
         secret_saved,
         etag: &data.etag,
@@ -779,6 +801,7 @@ fn render_blacklist(
         integration_action_keys: &integration_action_keys,
         integration_secrets_available: false,
         can_manage_secrets: false,
+        integration_orphans: None,
         integration_secret_error: None,
         secret_saved: false,
         etag: "",
@@ -1347,6 +1370,61 @@ pub(super) async fn integration_secret_action_route(
         );
     }
     integration_secret_action(&app, &headers, &id, &actor, &intents[0], pairs).await
+}
+
+pub(super) async fn integration_orphan_delete_route(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<HashMap<String, String>>,
+) -> Response {
+    let l = lang(&headers, &app);
+    let Some(actor) = user(&headers, &app) else {
+        return Redirect::to("/login").into_response();
+    };
+    if !crate::session::snowflake(&id)
+        || form.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "integration_id" | "generation" | "secret_name"
+            )
+        })
+    {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    }
+    let (Some(integration_id), Some(generation), Some(secret_name)) = (
+        form.get("integration_id"),
+        form.get("generation"),
+        form.get("secret_name"),
+    ) else {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    };
+    if !integration_id_valid(integration_id)
+        || !generation_valid(generation)
+        || !integration_secret_name_valid(secret_name)
+    {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    }
+    match app
+        .api
+        .delete_orphan_secret(&id, integration_id, generation, secret_name, &actor)
+        .await
+    {
+        Ok(_) => Redirect::to(&format!("/g/{id}/tickets/settings?secret_saved=1")).into_response(),
+        Err(error) => {
+            let data = match modules::load(&app, &id, l.bot_language()).await {
+                Ok(data) => data,
+                Err(error) => return api_error(&error, l, &headers),
+            };
+            let status = if error.status.is_client_error() {
+                error.status
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            let message = integration_secret_error(&error, l);
+            integration_secret_feedback(&app, &headers, &id, &actor, &data, message, status).await
+        }
+    }
 }
 
 #[allow(clippy::too_many_lines)]

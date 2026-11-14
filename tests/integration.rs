@@ -93,6 +93,39 @@ fn notification_revision_etag(revision: u32) -> &'static str {
     }
 }
 
+/// Gallery source `index` is named like this, so a search for `& <b>` matches every source.
+fn gallery_source_name(index: usize) -> String {
+    format!("Source {index:03} & <b>")
+}
+
+/// Pages of 25 sources with an opaque `src-NNN` cursor; `q` filters by name, as the plugin does.
+fn gallery_source_state(count: usize, query: &str) -> serde_json::Value {
+    let params: std::collections::HashMap<String, String> =
+        serde_urlencoded::from_str(query).unwrap_or_default();
+    let needle = params.get("q").map(|q| q.to_lowercase());
+    let start = params
+        .get("cursor")
+        .and_then(|cursor| cursor.strip_prefix("src-")?.parse::<usize>().ok())
+        .unwrap_or(0);
+    let matching: Vec<usize> = (0..count)
+        .filter(|index| {
+            needle
+                .as_deref()
+                .is_none_or(|needle| gallery_source_name(*index).to_lowercase().contains(needle))
+        })
+        .collect();
+    let sources: Vec<serde_json::Value> = matching
+        .iter()
+        .skip(start)
+        .take(25)
+        .map(|index| {
+            json!({"kind": "panel", "id": format!("src-{index:03}"), "name": gallery_source_name(*index)})
+        })
+        .collect();
+    let next = (start + 25 < matching.len()).then(|| format!("src-{:03}", start + 25));
+    json!({"state": {"sources": sources, "next_cursor": next}})
+}
+
 #[derive(Default)]
 struct Fake {
     calls: Vec<(String, String, String, String)>,
@@ -125,6 +158,11 @@ struct Fake {
     ticket_forbidden: bool,
     // A member who can read the settings but may not manage integration secrets.
     secret_outsider: bool,
+    // Gallery sources `src-000`.. when non-zero; the orphan secrets the owner can clean up.
+    gallery_sources: usize,
+    orphans: Vec<serde_json::Value>,
+    orphan_list_status: Option<StatusCode>,
+    orphan_delete_status: Option<StatusCode>,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -156,7 +194,7 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
     let body = to_bytes(request.into_body(), 65536).await.unwrap();
     let mut fake = state.lock().unwrap();
     fake.keys.extend(key);
-    if path.contains("/cases") {
+    if path.contains("/cases") || path.ends_with("/orphans/delete") {
         fake.bodies
             .push((path.clone(), String::from_utf8_lossy(&body).into_owned()));
     }
@@ -282,6 +320,32 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         }
     } else if path.ends_with("/directory") {
         json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path == "/v1/guilds/42/ticket-actions/gallery/gallery" && fake.gallery_sources > 0 {
+        gallery_source_state(fake.gallery_sources, &query)
+    } else if path == "/v1/guilds/42/integration-secrets/orphans" && method == Method::GET {
+        if let Some(status) = fake.orphan_list_status {
+            return (status, [(header::ETAG, r#""1""#)], "{}".into());
+        }
+        json!({"orphans": fake.orphans})
+    } else if path == "/v1/guilds/42/integration-secrets/orphans/delete" && method == Method::POST {
+        if let Some(status) = fake.orphan_delete_status {
+            return (status, [(header::ETAG, r#""1""#)], "{}".into());
+        }
+        let posted: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let before = fake.orphans.len();
+        fake.orphans.retain(|orphan| {
+            orphan["integration_id"] != posted["integration_id"]
+                || orphan["generation"] != posted["generation"]
+                || orphan["secret_name"] != posted["secret_name"]
+        });
+        if fake.orphans.len() == before {
+            return (
+                StatusCode::NOT_FOUND,
+                [(header::ETAG, r#""1""#)],
+                "{}".into(),
+            );
+        }
+        json!({"deleted": true})
     } else if path == "/v1/guilds/42/ticket-actions/tags/tags" && fake.ticket_tag_count > 0 {
         ticket_tag_state(fake.ticket_tag_count, &query)
     } else if path.contains("/ticket-actions/") {
@@ -345,6 +409,22 @@ async fn setup() -> (Config, Arc<Mutex<Fake>>) {
         state,
     )
 }
+async fn get_html(config: &Config, path: &str) -> (StatusCode, String) {
+    let response = router(config.clone())
+        .oneshot(request(config, Method::GET, path, ""))
+        .await
+        .unwrap();
+    let status = response.status();
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    (status, html)
+}
+
 fn request(config: &Config, method: Method, path: &str, body: &str) -> Request {
     Request::builder()
         .method(method)
@@ -921,6 +1001,12 @@ async fn state_cookie_has_security_attributes() {
 
 #[path = "integration/remaining.rs"]
 mod remaining;
+
+#[path = "integration/gallery_picker.rs"]
+mod gallery_picker;
+
+#[path = "integration/orphans.rs"]
+mod orphans;
 
 #[tokio::test]
 async fn integration_secret_action_checks_management_before_loading_settings() {

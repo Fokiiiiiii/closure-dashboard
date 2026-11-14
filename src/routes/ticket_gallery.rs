@@ -183,6 +183,7 @@ pub(super) async fn submissions(
     .into_response()
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn publish(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -197,7 +198,7 @@ pub(super) async fn publish(
         || query.keys().any(|key| {
             !matches!(
                 key.as_str(),
-                "kind" | "source_id" | "submission_id" | "saved"
+                "kind" | "source_id" | "submission_id" | "saved" | "q" | "cursor"
             )
         })
         || query.get("saved").is_some_and(|value| value != "1")
@@ -217,10 +218,17 @@ pub(super) async fn publish(
         Some(_) => return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers),
         None => None,
     };
-    // shortcut: the source picker uses the first plugin page; add cursor paging when guilds need later sources.
+    let search = query.get("q").map_or("", String::as_str).trim();
+    if search.chars().count() > 100 || has_controls(search) {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    }
+    let cursor = query.get("cursor").map(String::as_str);
+    if cursor.is_some_and(|cursor| !valid_cursor(cursor)) {
+        return error_page(StatusCode::BAD_REQUEST, l, keys::INVALID, &headers);
+    }
     let (sources, submissions, guilds) = tokio::join!(
         app.api
-            .ticket_action_state(&id, "gallery", "gallery", &actor),
+            .gallery_source_state(&id, (!search.is_empty()).then_some(search), cursor, &actor),
         async {
             if editing.is_some() {
                 app.api.gallery_submissions(&id, &actor).await
@@ -285,6 +293,8 @@ pub(super) async fn publish(
         submission.as_ref(),
         &app.nonces.fresh(),
         query.get("saved").is_some_and(|value| value == "1"),
+        search,
+        sources["next_cursor"].as_str(),
     ))
     .into_response()
 }
@@ -621,14 +631,15 @@ pub(super) async fn submission_action(
 }
 
 fn valid_sources_state(value: &Value) -> bool {
-    value["sources"].as_array().is_some_and(|sources| {
-        sources.len() <= 1000
-            && sources.iter().all(|source| {
-                matches!(source["kind"].as_str(), Some("panel" | "tag" | "form"))
-                    && source["id"].as_str().is_some_and(valid_source_id)
-                    && source["name"].as_str().is_some()
-            })
-    })
+    (value["next_cursor"].is_null() || value["next_cursor"].as_str().is_some_and(valid_cursor))
+        && value["sources"].as_array().is_some_and(|sources| {
+            sources.len() <= 1000
+                && sources.iter().all(|source| {
+                    matches!(source["kind"].as_str(), Some("panel" | "tag" | "form"))
+                        && source["id"].as_str().is_some_and(valid_source_id)
+                        && source["name"].as_str().is_some()
+                })
+        })
 }
 
 fn valid_gallery_page(value: &Value, offset: u32) -> bool {
@@ -681,6 +692,10 @@ fn valid_submission(value: &Value) -> bool {
         && value["revision"]
             .as_i64()
             .is_some_and(|revision| revision > 0)
+}
+
+fn valid_cursor(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 200 && !has_controls(value)
 }
 
 fn valid_template_id(value: &str) -> bool {
