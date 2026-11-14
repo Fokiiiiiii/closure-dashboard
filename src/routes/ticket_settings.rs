@@ -1200,6 +1200,20 @@ async fn integration_secret_action(
             headers,
         );
     }
+    // Management is checked before any settings are loaded: the loader uses the service credential.
+    let state = match app.api.ticket_integration_secrets(id, actor).await {
+        Ok((response, _)) => response.get("state").cloned().unwrap_or(Value::Null),
+        Err(error) if error.status.is_server_error() => return api_error(&error, l, headers),
+        Err(_) => return error_page(StatusCode::FORBIDDEN, l, keys::DENIED, headers),
+    };
+    if state["can_manage_secrets"] != true {
+        return error_page(
+            StatusCode::FORBIDDEN,
+            l,
+            keys::TICKET_INTEGRATION_SECRETS_OWNER_ONLY,
+            headers,
+        );
+    }
     let data = match modules::load(app, id, l.bot_language()).await {
         Ok(data) => data,
         Err(error) => return api_error(&error, l, headers),
@@ -1232,31 +1246,6 @@ async fn integration_secret_action(
             &data,
             l.text(keys::CONFLICT),
             StatusCode::CONFLICT,
-        )
-        .await;
-    }
-    let (state, _) = match app.api.ticket_integration_secrets(id, actor).await {
-        Ok((response, etag)) => (response.get("state").cloned().unwrap_or(Value::Null), etag),
-        Err(error) => {
-            let message = integration_secret_error(&error, l);
-            let status = if error.status.is_client_error() {
-                error.status
-            } else {
-                StatusCode::BAD_GATEWAY
-            };
-            return integration_secret_feedback(app, headers, id, actor, &data, message, status)
-                .await;
-        }
-    };
-    if state["can_manage_secrets"] != true {
-        return integration_secret_feedback(
-            app,
-            headers,
-            id,
-            actor,
-            &data,
-            l.text(keys::TICKET_INTEGRATION_SECRETS_OWNER_ONLY),
-            StatusCode::FORBIDDEN,
         )
         .await;
     }

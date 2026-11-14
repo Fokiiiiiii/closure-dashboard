@@ -73,6 +73,8 @@ struct Fake {
     // A moderator who may read the cases but not change the dashboard.
     viewer: bool,
     ticket_forbidden: bool,
+    // A member who can read the settings but may not manage integration secrets.
+    secret_outsider: bool,
 }
 async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl IntoResponse {
     let path = request.uri().path().to_owned();
@@ -191,6 +193,8 @@ async fn bot(State(state): State<Arc<Mutex<Fake>>>, request: Request) -> impl In
         }
     } else if path.ends_with("/directory") {
         json!({"roles":[{"id":"10","name":"<script>","color":1234},{"id":"11","name":"Admin","color":0}]})
+    } else if path.contains("/ticket-actions/") {
+        json!({"state":{"can_manage_secrets": !fake.secret_outsider}})
     } else if path.contains("/tickets") && fake.ticket_forbidden {
         return (
             StatusCode::FORBIDDEN,
@@ -826,3 +830,41 @@ async fn state_cookie_has_security_attributes() {
 
 #[path = "integration/remaining.rs"]
 mod remaining;
+
+#[tokio::test]
+async fn integration_secret_action_checks_management_before_loading_settings() {
+    let (config, state) = setup().await;
+    state.lock().unwrap().secret_outsider = true;
+    let body = "intent=integration.secret.remove&integration_id=missing&generation=0123456789abcdef0123456789abcdef&secret_name=token&operation_key=0123456789abcdef01234567";
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::POST,
+            "/g/42/tickets/settings/integrations/actions",
+            body,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(!html.contains("alert(1)"));
+    assert!(!html.contains("<form"));
+
+    state.lock().unwrap().secret_outsider = false;
+    let response = router(config.clone())
+        .oneshot(request(
+            &config,
+            Method::POST,
+            "/g/42/tickets/settings/integrations/actions",
+            body,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
